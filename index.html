@@ -172,22 +172,27 @@
   <section aria-labelledby="s2">
     <h2 id="s2"><span class="step">2</span>Chia cảnh</h2>
     <div class="row">
-      <label class="field grow">API key Claude (để AI xem hình, chia cảnh và viết kịch bản; không bắt buộc)
-        <input type="password" id="apiKey" placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
-      </label>
-      <label class="small row" style="gap:6px"><input type="checkbox" id="rememberKey"> Nhớ key trên máy này</label>
-      <button id="keyBtn">Bật AI</button>
-      <button class="ghost" id="keyClear">Xoá key</button>
-    </div>
-    <div class="status small" id="keyStatus">Chưa có key: vẫn chia theo giờ quay được. Key tạo ở console.anthropic.com, trả phí theo lượt dùng (mỗi lần chia khoảng vài nghìn đồng). Key chỉ gửi thẳng tới Claude, không đi đâu khác.</div>
-    <div class="row">
-      <button class="primary" id="autoBtn" disabled>Để AI xem hình và chia cảnh</button>
+      <button class="primary" id="autoBtn" disabled>Để AI xem hình, chia cảnh và đưa lên Google Drive</button>
+      <button id="resortBtn" disabled>Chia lại tự động</button>
       <button id="timeBtn" disabled>Chỉ chia theo giờ quay</button>
       <label class="field">Cách nhau quá (phút) là cảnh mới
         <input type="text" id="gap" value="30" inputmode="numeric" style="width:90px">
       </label>
     </div>
-    <div class="status" id="sortStatus" aria-live="polite">Chọn clip ở bước 1 trước.</div>
+    <div class="status" id="sortStatus" aria-live="polite">Chọn clip ở bước 1 là trang tự xem hình và chia cảnh. AI chạy ngay trên máy bạn, miễn phí, không cần key; lần đầu tải bộ nhận diện hình khoảng 90 MB (chỉ 1 lần).</div>
+    <div class="bar" id="aiBar" hidden><i></i></div>
+    <details id="driveSetup">
+      <summary class="small">Cài đặt Google Drive (làm 1 lần)</summary>
+      <div class="row" style="margin-top:8px">
+        <label class="field grow">Google Client ID
+          <input type="text" id="gClientId" placeholder="xxxxxxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false">
+        </label>
+        <button id="gSave">Lưu</button>
+      </div>
+      <div class="muted small">Mã này không phải mật khẩu, chỉ để Google biết trang nào xin quyền. Trang chỉ được tạo thư mục mới và tải clip lên Drive của bạn, không đọc được file khác.</div>
+    </details>
+    <div class="status" id="driveStatus" aria-live="polite"></div>
+    <div class="bar" id="driveBar" hidden><i></i></div>
     <div class="scenes" id="scenes"></div>
     <div class="row" id="sceneTools" hidden>
       <button id="addScene">+ Thêm cảnh trống</button>
@@ -201,10 +206,7 @@
       <label class="field">Độ dài
         <select id="len"><option>30 giây</option><option selected>45 giây</option><option>60 giây</option><option>90 giây</option></select>
       </label>
-      <label class="field grow">Giọng / phong cách
-        <input type="text" id="style" value="Vlog TikTok nhẹ nhàng, tối giản, voice-over xưng “mình”">
-      </label>
-      <button class="primary" id="scriptBtn" disabled>Viết kịch bản</button>
+      <button class="primary" id="scriptBtn" disabled>Tạo kịch bản nháp</button>
     </div>
     <div class="status" id="scriptStatus" aria-live="polite">Chia cảnh ở bước 2 trước.</div>
     <div id="scriptOut" hidden>
@@ -238,14 +240,10 @@
   const clips = [];      // {id, file, name, size, time:Date, timeFrom, dur, thumbUrl, thumbImg, ok, desc, scene}
   let scenes = [];       // {id, name}
   let script = null;
-  let sampleFn = null, downloads = null, imgLimits = null;
+  let downloads = null;
   let sceneSeq = 0;
 
-  // ---------- chạy độc lập: AI bằng API key riêng, tải file bằng trình duyệt ----------
-  const KEY_STORE = "chia-source-anthropic-key";
-  const SDK_URL = "https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@1.3.0/+esm";
-  let AnthropicCls = null;
-
+  // ---------- chạy độc lập: AI xem hình ngay trên máy (miễn phí), tải file bằng trình duyệt, đưa lên Google Drive ----------
   downloads = {
     save: async ({ filename, data }) => {
       const url = URL.createObjectURL(data instanceof Blob ? data : new Blob([data]));
@@ -256,69 +254,216 @@
     }
   };
 
-  function blobToB64(blob) {
-    return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1]); r.onerror = rej; r.readAsDataURL(blob); });
-  }
-  function parseJsonLoose(text) {
-    try { return JSON.parse(text); } catch (e) {}
-    const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/); if (fence) { try { return JSON.parse(fence[1]); } catch (e) {} }
-    const a = text.search(/[\[{]/), b = Math.max(text.lastIndexOf("}"), text.lastIndexOf("]"));
-    if (a >= 0 && b > a) { try { return JSON.parse(text.slice(a, b + 1)); } catch (e) {} }
-    throw { code: "invalid_json" };
-  }
-  async function makeSample(key) {
-    if (!AnthropicCls) AnthropicCls = (await import(SDK_URL)).default;
-    const client = new AnthropicCls({ apiKey: key, dangerouslyAllowBrowser: true });
-    const fn = {};
-    fn.limits = async () => ({ images: { maxCount: 20 } });
-    fn.json = async (prompt, opts = {}) => {
-      const content = [];
-      for (const b of [].concat(opts.images || [])) content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: await blobToB64(b) } });
-      content.push({ type: "text", text: prompt });
-      let msg;
-      try {
-        msg = await client.beta.messages.create({
-          model: "claude-opus-5-5",
-          max_tokens: 16000,
-          betas: ["server-side-fallback-2026-07-01"],
-          fallbacks: "default",
-          output_config: { effort: "medium" },
-          messages: [{ role: "user", content }]
-        }, { signal: opts.signal });
-      } catch (e) {
-        if (opts.signal && opts.signal.aborted) throw { code: "cancelled" };
-        if (e && (e.status === 401 || e.status === 403)) throw { code: "bad_key" };
-        if (e && e.status === 429) throw { code: "rate_limited" };
-        if (e && e.status === 400 && /credit|billing/i.test(String(e.message))) throw { code: "no_credit" };
-        throw { code: "upstream_error" };
-      }
-      if (msg.stop_reason === "refusal") throw { code: "refused" };
-      const text = msg.content.filter(b => b.type === "text").map(b => b.text).join("");
-      return parseJsonLoose(text);
-    };
-    return fn;
-  }
-  async function useKey(key, remember) {
-    const st = $("keyStatus");
-    if (!key) { sampleFn = null; imgLimits = null; setStatus(st, "Chưa có key: vẫn chia theo giờ quay được, AI và viết kịch bản tạm tắt."); refreshButtons(); return; }
-    try {
-      sampleFn = await makeSample(key);
-      imgLimits = (await sampleFn.limits()).images;
-      try { remember ? localStorage.setItem(KEY_STORE, key) : localStorage.removeItem(KEY_STORE); } catch (e) {}
-      setStatus(st, remember ? "Đã bật AI. Key được lưu trên trình duyệt của máy này." : "Đã bật AI cho lần mở trang này (không lưu key).", "ok");
-    } catch (e) {
-      sampleFn = null;
-      setStatus(st, "Không tải được bộ kết nối Claude. Kiểm tra mạng rồi bấm lại.", "err");
+  // Nhãn cảnh: tên tiếng Việt + mô tả tiếng Anh cho bộ nhận diện hình. fam = nhóm gần nhau (không tách cảnh khi đổi trong cùng nhóm)
+  const LABELS = [
+    { vi: "Ăn uống", en: "a bowl of food or dishes on a dining table", fam: "food" },
+    { vi: "Đồ ăn vặt", en: "street food snacks or grilled food", fam: "food" },
+    { vi: "Quán cà phê", en: "a coffee shop, drinks or a cafe menu board", fam: "cafe" },
+    { vi: "Rừng cây, lá", en: "a forest with trees and fallen leaves", fam: "nature" },
+    { vi: "Vườn hoa", en: "a flower garden", fam: "nature" },
+    { vi: "Đồi núi", en: "mountains and hills landscape", fam: "nature" },
+    { vi: "Trên xe", en: "the inside of a car", fam: "car" },
+    { vi: "Phòng nghỉ", en: "a hotel room or a window view from a room", fam: "room" },
+    { vi: "Dạo phố", en: "a street with shops and buildings", fam: "street" },
+    { vi: "Chợ", en: "a busy market", fam: "street" },
+    { vi: "Biển", en: "a beach and the sea", fam: "water" },
+    { vi: "Hồ, sông", en: "a lake or a river", fam: "water" },
+    { vi: "Thú cưng", en: "a pet dog or cat", fam: "pet" },
+    { vi: "Makeup, mỹ phẩm", en: "makeup products, lipstick and cosmetics on a table", fam: "makeup" },
+    { vi: "Buổi tối", en: "a city at night with lights", fam: "night" },
+    { vi: "", en: "a selfie of a person", fam: "person" },
+    { vi: "", en: "a person posing for a photo", fam: "person" }
+  ];
+  const TF_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.1";
+  let clfPromise = null;
+  function getClassifier() {
+    if (!clfPromise) {
+      clfPromise = (async () => {
+        const { pipeline } = await import(TF_URL);
+        const seen = {};
+        return pipeline("zero-shot-image-classification", "Xenova/clip-vit-base-patch32", {
+          dtype: "q8",
+          progress_callback: p => {
+            if (p.status === "progress" && p.total) {
+              seen[p.file] = [p.loaded, p.total];
+              const v = Object.values(seen), done = v.reduce((s, x) => s + x[0], 0), tot = v.reduce((s, x) => s + x[1], 0);
+              setStatus($("sortStatus"), `Đang tải bộ nhận diện hình (chỉ lần đầu): ${Math.round(done / 1048576)}/${Math.round(tot / 1048576)} MB`);
+              setBar($("aiBar"), done / tot);
+            }
+          }
+        });
+      })();
+      clfPromise.catch(() => { clfPromise = null; });
     }
-    refreshButtons();
+    return clfPromise;
   }
-  $("keyBtn").addEventListener("click", () => useKey($("apiKey").value.trim(), $("rememberKey").checked));
-  $("keyClear").addEventListener("click", () => { $("apiKey").value = ""; try { localStorage.removeItem(KEY_STORE); } catch (e) {} useKey("", false); });
-  setTimeout(() => {
-    let saved = ""; try { saved = localStorage.getItem(KEY_STORE) || ""; } catch (e) {}
-    if (saved) { $("apiKey").value = saved; $("rememberKey").checked = true; useKey(saved, true); }
-    else refreshButtons();
-  }, 0);
+  async function classifyClips(list) {
+    const clf = await getClassifier();
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      setStatus($("sortStatus"), `AI đang xem hình clip ${i + 1}/${list.length}…`);
+      setBar($("aiBar"), i / list.length);
+      if (!c.thumbBlob) { c.scores = null; continue; }
+      const url = URL.createObjectURL(c.thumbBlob);
+      try {
+        const out = await clf(url, LABELS.map(l => l.en), { hypothesis_template: "a photo of {}" });
+        c.scores = LABELS.map(l => (out.find(o => o.label === l.en) || { score: 0 }).score);
+      } finally { URL.revokeObjectURL(url); }
+      const place = LABELS.map((l, k) => [l, c.scores[k]]).filter(x => x[0].fam !== "person").sort((a, b) => b[1] - a[1]);
+      const person = LABELS.reduce((s, l, k) => s + (l.fam === "person" ? c.scores[k] : 0), 0);
+      c.desc = (person > place[0][1] ? "có người · " : "") + place.slice(0, 2).filter(x => x[1] > 0.08).map(x => x[0].vi.toLowerCase()).join(", ");
+    }
+    setBar($("aiBar"), null);
+  }
+  function bestPlace(c) {
+    if (!c.scores) return null;
+    let best = null, bs = -1;
+    LABELS.forEach((l, k) => { if (l.fam !== "person" && c.scores[k] > bs) { bs = c.scores[k]; best = k; } });
+    const person = LABELS.reduce((s, l, k) => s + (l.fam === "person" ? c.scores[k] : 0), 0);
+    return { k: best, score: bs, personish: person > bs };
+  }
+  // Chia: tách theo giờ quay trước, rồi tách tiếp khi hình đổi hẳn sang nhóm cảnh khác. Tên cảnh = nhãn có tổng điểm cao nhất.
+  function sortByAI() {
+    const gap = Math.max(1, parseInt($("gap").value, 10) || 30) * 60000;
+    const groups = []; let cur = null, last = null;
+    clips.forEach(c => {
+      const bp = bestPlace(c);
+      const strong = bp && !bp.personish && bp.score >= 0.5;
+      const timeBreak = !cur || c.time - last > gap || dayKey(c.time) !== dayKey(last);
+      const visualBreak = cur && strong && cur.fam && LABELS[bp.k].fam !== cur.fam;
+      if (timeBreak || visualBreak) { cur = { clips: [], fam: null }; groups.push(cur); }
+      cur.clips.push(c);
+      if (strong && !cur.fam) cur.fam = LABELS[bp.k].fam;
+      last = c.time;
+    });
+    const used = {};
+    scenes = groups.map(g => {
+      const sum = LABELS.map((l, k) => l.fam === "person" ? -1 : g.clips.reduce((s, c) => s + (c.scores ? c.scores[k] : 0), 0));
+      const k = sum.indexOf(Math.max(...sum));
+      let name = sum[k] > 0 ? LABELS[k].vi : "Cảnh " + pad(groups.indexOf(g) + 1);
+      used[name] = (used[name] || 0) + 1;
+      if (used[name] > 1) name += " " + used[name];
+      const s = { id: "s" + (++sceneSeq), name, label: sum[k] > 0 ? LABELS[k].vi : "" };
+      g.clips.forEach(c => c.scene = s.id);
+      return s;
+    });
+  }
+  async function autoSort() {
+    try {
+      await classifyClips(clips.filter(c => !c.scores));
+      sortByAI();
+      script = null; $("scriptOut").hidden = true;
+      renderScenes();
+      setStatus($("sortStatus"), `AI đã chia ${scenes.length} cảnh. Sửa tên cảnh cho đúng tên quán / địa điểm nếu cần.`, "ok");
+      return true;
+    } catch (e) {
+      setBar($("aiBar"), null);
+      byTime(); renderScenes();
+      setStatus($("sortStatus"), "Không tải được bộ nhận diện hình (kiểm tra mạng). Đã chia theo giờ quay thay thế.", "err");
+      return false;
+    }
+  }
+
+  // ---------- Google Drive ----------
+  const GOOGLE_CLIENT_ID = "";
+  const G_STORE = "chia-source-google-client-id";
+  function clientId() { let v = GOOGLE_CLIENT_ID; try { v = v || localStorage.getItem(G_STORE) || ""; } catch (e) {} return v.trim(); }
+  $("gClientId").value = clientId();
+  $("driveSetup").open = !clientId();
+  $("gSave").addEventListener("click", () => {
+    try { localStorage.setItem(G_STORE, $("gClientId").value.trim()); } catch (e) {}
+    tokenClient = null; $("driveSetup").open = !clientId();
+    setStatus($("driveStatus"), clientId() ? "Đã lưu. Bấm nút ở trên để chia và đưa lên Drive." : "Chưa có Client ID.", clientId() ? "ok" : "");
+  });
+  let gisReady = null, tokenClient = null, pendingToken = null;
+  function loadGis() {
+    if (!gisReady) gisReady = new Promise((res, rej) => {
+      const s = document.createElement("script"); s.src = "https://accounts.google.com/gsi/client"; s.async = true;
+      s.onload = res; s.onerror = () => { gisReady = null; rej(new Error("gis")); }; document.head.appendChild(s);
+    });
+    return gisReady;
+  }
+  loadGis().catch(() => {});
+  function requestToken() {
+    // phải gọi ngay trong lúc bấm nút để cửa sổ đăng nhập Google không bị chặn
+    return new Promise((res, rej) => {
+      if (!window.google || !google.accounts || !google.accounts.oauth2) return rej(new Error("gis"));
+      if (!tokenClient) tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: clientId(), scope: "https://www.googleapis.com/auth/drive.file",
+        callback: r => { const p = pendingToken; pendingToken = null; r && r.access_token ? p.res(r.access_token) : p.rej(new Error(r && r.error || "denied")); },
+        error_callback: err => { const p = pendingToken; pendingToken = null; p && p.rej(new Error(err && err.type || "denied")); }
+      });
+      pendingToken = { res, rej };
+      tokenClient.requestAccessToken({ prompt: "" });
+    });
+  }
+  async function gFetch(token, url, opts = {}) {
+    const r = await fetch(url, { ...opts, headers: { Authorization: "Bearer " + token, ...(opts.headers || {}) } });
+    if (!r.ok) throw new Error("drive " + r.status);
+    return r;
+  }
+  async function makeFolder(token, name, parent) {
+    const body = { name, mimeType: "application/vnd.google-apps.folder" };
+    if (parent) body.parents = [parent];
+    const r = await gFetch(token, "https://www.googleapis.com/drive/v3/files?fields=id", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    return (await r.json()).id;
+  }
+  async function uploadFile(token, blob, name, parent, type, onProgress) {
+    const init = await gFetch(token, "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id", {
+      method: "POST",
+      headers: { "Content-Type": "application/json; charset=UTF-8", "X-Upload-Content-Type": type, "X-Upload-Content-Length": String(blob.size) },
+      body: JSON.stringify({ name, parents: [parent] })
+    });
+    const loc = init.headers.get("Location");
+    if (!loc) throw new Error("no upload url");
+    await new Promise((res, rej) => {
+      const x = new XMLHttpRequest();
+      x.open("PUT", loc);
+      x.setRequestHeader("Content-Type", type);
+      x.upload.onprogress = e => { if (e.lengthComputable) onProgress(e.loaded); };
+      x.onload = () => x.status < 300 ? res() : rej(new Error("upload " + x.status));
+      x.onerror = () => rej(new Error("network"));
+      x.send(blob);
+    });
+  }
+  async function uploadToDrive(token) {
+    const paths = folderPaths();
+    const st = $("driveStatus");
+    const total = clips.reduce((s, c) => s + c.size, 0);
+    let done = 0;
+    setStatus(st, "Đang tạo thư mục trên Google Drive…");
+    const root = await makeFolder(token, safe($("project").value));
+    const cache = {};
+    async function folderFor(path) {
+      let parent = root, acc = "";
+      for (const seg of path.split("/")) {
+        acc += "/" + seg;
+        if (!cache[acc]) cache[acc] = await makeFolder(token, seg, parent);
+        parent = cache[acc];
+      }
+      return parent;
+    }
+    let n = 0;
+    for (const c of clips) {
+      const dir = await folderFor(paths.get(c.scene));
+      n++;
+      const base = done;
+      await uploadFile(token, c.file, c.name, dir, c.file.type || "video/mp4", loaded => {
+        setBar($("driveBar"), (base + loaded) / total);
+        setStatus(st, `Đang tải lên Drive ${n}/${clips.length}: ${c.name} · ${fmtMB(base + loaded)} / ${fmtMB(total)}`);
+      });
+      done += c.size;
+    }
+    await uploadFile(token, new Blob(["﻿" + listText()], { type: "text/plain" }), "_DANH-SACH-SOURCE.txt", root, "text/plain", () => {});
+    if (script) await uploadFile(token, new Blob(["﻿" + scriptText()], { type: "text/plain" }), "_KICH-BAN.txt", root, "text/plain", () => {});
+    setBar($("driveBar"), null);
+    const link = "https://drive.google.com/drive/folders/" + root;
+    st.className = "status ok"; st.textContent = `Xong: đã đưa ${clips.length} clip lên Google Drive, chia sẵn thư mục. `;
+    const a = document.createElement("a"); a.href = link; a.target = "_blank"; a.rel = "noopener"; a.textContent = "Mở thư mục trên Drive";
+    st.appendChild(a);
+    lastDriveLink = link;
+  }
+  let lastDriveLink = "";
 
   // ---------- helpers ----------
   const pad = n => String(n).padStart(2, "0");
@@ -499,10 +644,12 @@
     if (noTime) msg += ` ${noTime} clip không có giờ quay trong file, đang dùng giờ sửa file.`;
     if (noImg) msg += ` ${noImg} clip trình duyệt không xem được hình (thường là MOV mã HEVC), vẫn chia theo giờ.`;
     setStatus($("loadStatus"), msg, noTime || noImg ? "" : "ok");
-    if (!scenes.length) setStatus($("sortStatus"), "Bấm “Để AI xem hình và chia cảnh”, hoặc chia nhanh theo giờ quay.");
-    else { clips.forEach(c => { if (!c.scene) c.scene = scenes[scenes.length - 1].id; }); renderScenes(); }
     renderClips();
     refreshButtons();
+    // vừa thêm clip là tự xem hình và chia luôn
+    loading = true; refreshButtons();
+    await autoSort();
+    loading = false; refreshButtons();
   }
 
   function clipNo(c) { return clips.indexOf(c) + 1; }
@@ -612,127 +759,99 @@
     setStatus($("sortStatus"), `Đã chia ${scenes.length} cảnh theo giờ quay. Đổi tên từng cảnh cho editor dễ hiểu.`, "ok");
   });
 
-  // ---------- AI sorting ----------
-  async function buildSheets(list, perSheet) {
-    const sheets = [];
-    for (let s = 0; s < list.length; s += perSheet) {
-      const part = list.slice(s, s + perSheet);
-      const cols = 4, rows = Math.ceil(part.length / cols), W = 300, H = 400;
-      const c = document.createElement("canvas"); c.width = cols * W; c.height = rows * H;
-      const g = c.getContext("2d"); g.fillStyle = "#000"; g.fillRect(0, 0, c.width, c.height);
-      for (let i = 0; i < part.length; i++) {
-        const clip = part[i], x = (i % cols) * W, y = Math.floor(i / cols) * H;
-        if (clip.thumbBlob) { const bmp = await createImageBitmap(clip.thumbBlob); g.drawImage(bmp, x, y, W, H); bmp.close && bmp.close(); }
-        g.fillStyle = "rgba(0,0,0,.75)"; g.fillRect(x, y, 86, 44);
-        g.fillStyle = "#ffd54a"; g.font = "bold 32px sans-serif"; g.fillText("#" + clipNo(clip), x + 8, y + 34);
-        g.strokeStyle = "#000"; g.lineWidth = 4; g.strokeRect(x, y, W, H);
-      }
-      sheets.push(await new Promise(r => c.toBlob(r, "image/jpeg", 0.85)));
-    }
-    return sheets;
-  }
-
-  let aiCtl = null;
+  // ---------- nút chính: xem hình → chia → đưa lên Drive ----------
+  $("resortBtn").addEventListener("click", async () => { $("resortBtn").disabled = true; await autoSort(); refreshButtons(); });
   $("autoBtn").addEventListener("click", async () => {
-    if (!sampleFn) return;
-    const withImg = clips.filter(c => c.ok);
-    const perSheet = 12;
-    if (!imgLimits || !withImg.length) { setStatus($("sortStatus"), "AI không xem hình được ở đây. Đã chia theo giờ quay thay thế.", "err"); byTime(); renderScenes(); return; }
-    const maxSheets = imgLimits.maxCount || 1;
-    const usable = withImg.slice(0, maxSheets * perSheet);
-    const btn = $("autoBtn"); btn.disabled = true;
-    setStatus($("sortStatus"), "Đang ghép ảnh các clip…");
+    const btn = $("autoBtn");
+    let tokenP = null;
+    if (clientId()) { tokenP = requestToken(); tokenP.catch(() => {}); }
+    btn.disabled = true;
     try {
-      const sheets = await buildSheets(usable, perSheet);
-      const lines = clips.map(c => `#${clipNo(c)} ${c.name} · ${fmtDate(c.time)} ${fmtTime(c.time)} · ${fmtDur(c.dur) || "?"}${c.ok ? "" : " · (không có hình)"}${c.landscape ? " · quay ngang" : ""}`).join("\n");
-      const prompt =
-`Bạn là trợ lý dựng video. Mình có ${clips.length} clip quay bằng điện thoại cho dự án "${$("project").value}". Ảnh gửi kèm là ảnh ghép: mỗi ô là một khung hình của một clip, số #N vàng ở góc trên trái là số clip.
-Danh sách clip theo thứ tự giờ quay (số · tên file · ngày giờ · thời lượng):
-${lines}
-
-Nhiệm vụ: chia clip thành các CẢNH theo địa điểm / hoạt động (ví dụ "Ăn sáng bánh canh", "Quán cà phê", "Dạo rừng lá phong", "Trên xe"), để editor mở thư mục là hiểu.
-Quy tắc:
-- Clip quay liền nhau ở cùng nơi, cùng hoạt động thì chung cảnh. Ưu tiên giữ đúng thứ tự thời gian; chỉ gộp clip cách xa về giờ khi rõ ràng cùng nơi.
-- Clip không có hình thì xếp theo giờ quay gần nhất.
-- Tên cảnh tiếng Việt có dấu, 2–5 chữ, không dùng ký tự / \\ : * ? " < > |. Không chắc tên món/quán thì ghi chung (vd "Quán ăn sáng") và thêm "(?)".
-- Mỗi clip một mô tả ngắn tối đa 12 chữ về nội dung hình.
-- Mỗi clip phải nằm trong đúng một cảnh.
-
-Chỉ trả về JSON đúng dạng:
-{"scenes":[{"name":"Ăn sáng bánh canh","clips":[1,2,3],"note":"gợi ý dùng cảnh này, 1 câu"}],"clips":[{"n":1,"desc":"cận rổ ớt, chanh trên bàn gỗ"}]}`;
-      setStatus($("sortStatus"), "AI đang xem hình và chia cảnh… (thường mất 20–60 giây)");
-      aiCtl = new AbortController();
-      const res = await sampleFn.json(prompt, { images: sheets, signal: aiCtl.signal });
-      if (!res || !Array.isArray(res.scenes)) throw { code: "invalid_json" };
-      scenes = [];
-      const assigned = new Set();
-      res.scenes.forEach(sc => {
-        const s = { id: "s" + (++sceneSeq), name: safe(String(sc.name || "Cảnh")), note: sc.note ? String(sc.note) : "" };
-        (sc.clips || []).forEach(n => { const c = clips[Number(n) - 1]; if (c && !assigned.has(c)) { c.scene = s.id; assigned.add(c); } });
-        scenes.push(s);
-      });
-      (res.clips || []).forEach(x => { const c = clips[Number(x.n) - 1]; if (c && x.desc) c.desc = String(x.desc); });
-      const left = clips.filter(c => !assigned.has(c));
-      if (left.length) {
-        const s = { id: "s" + (++sceneSeq), name: "Chưa phân loại", note: "AI chưa xếp các clip này, bạn chuyển giúp." };
-        scenes.push(s); left.forEach(c => c.scene = s.id);
+      if (!scenes.length || clips.some(c => !c.scene)) await autoSort();
+      if (!clientId()) {
+        $("driveSetup").open = true;
+        setStatus($("driveStatus"), "Đã chia xong. Muốn tự đưa lên Google Drive thì điền Google Client ID ở mục “Cài đặt Google Drive” ngay dưới (làm 1 lần).", "err");
+        return;
       }
-      scenes = scenes.filter(s => sceneClips(s).length);
-      script = null; $("scriptOut").hidden = true;
-      renderScenes();
-      let msg = `AI đã chia ${scenes.length} cảnh. Kiểm tra lại tên cảnh và chỗ có dấu (?).`;
-      if (withImg.length > usable.length) msg += ` ${withImg.length - usable.length} clip cuối vượt giới hạn ảnh, nằm ở “Chưa phân loại”.`;
-      setStatus($("sortStatus"), msg, "ok");
+      setStatus($("driveStatus"), "Đang chờ bạn đăng nhập Google trong cửa sổ mới…");
+      const token = await tokenP;
+      await uploadToDrive(token);
     } catch (e) {
-      const code = e && e.code;
-      const copy = {
-        not_granted: "Bạn chưa cho phép trang dùng Claude. Đã chia theo giờ quay thay thế.",
-        bad_key: "API key không đúng hoặc đã bị khoá. Kiểm tra lại key. Tạm chia theo giờ quay.",
-        no_credit: "Tài khoản API hết tiền. Nạp thêm ở console.anthropic.com. Tạm chia theo giờ quay.",
-        refused: "AI từ chối xử lý bộ ảnh này. Tạm chia theo giờ quay.",
-        rate_limited: "Đang gọi AI quá nhiều, thử lại sau ít phút. Tạm chia theo giờ quay.",
-        invalid_json: "AI trả kết quả không đọc được. Bấm lại để thử lần nữa.",
-        cancelled: "Đã dừng."
-      };
-      if (code !== "invalid_json" && code !== "cancelled") { byTime(); renderScenes(); }
-      setStatus($("sortStatus"), copy[code] || "Không gọi được AI lúc này. Đã chia theo giờ quay thay thế.", "err");
-    } finally { btn.disabled = false; refreshButtons(); }
+      setBar($("driveBar"), null);
+      const m = String(e && e.message || "");
+      setStatus($("driveStatus"),
+        m === "gis" ? "Không tải được phần đăng nhập Google. Kiểm tra mạng rồi bấm lại." :
+        /denied|popup|access_denied/.test(m) ? "Bạn chưa cho phép trang tải lên Drive, hoặc cửa sổ đăng nhập bị chặn. Bấm lại và chọn Cho phép." :
+        /drive 40[13]/.test(m) ? "Google từ chối quyền. Kiểm tra lại Client ID và tài khoản test trong Google Cloud." :
+        "Tải lên Drive bị dừng giữa chừng. Bấm lại để thử lần nữa (sẽ tạo thư mục mới).", "err");
+    } finally { refreshButtons(); }
   });
 
-  // ---------- script ----------
-  $("scriptBtn").addEventListener("click", async () => {
-    if (!sampleFn) return;
-    const paths = folderPaths();
-    const sceneText = orderedScenes().filter(s => sceneClips(s).length).map(s => {
-      const cs = sceneClips(s);
-      return `CẢNH "${s.name}" (${paths.get(s.id)})${s.note ? " — " + s.note : ""}\n` + cs.map(c => `  ${c.name.replace(/\.[^.]+$/, "")} · ${fmtTime(c.time)} · ${fmtDur(c.dur) || "?"}${c.landscape ? " · quay ngang" : ""}${c.desc ? " · " + c.desc : ""}`).join("\n");
-    }).join("\n\n");
-    const prompt =
-`Viết kịch bản video dọc 9:16 dài ${$("len").value} cho dự án "${$("project").value}".
-Phong cách: ${$("style").value}.
-Chỉ dùng các clip có sẵn dưới đây (tên clip không có đuôi), theo đúng nội dung mô tả, không bịa địa điểm, giá tiền hay tên quán không có trong mô tả.
-
-${sceneText}
-
-Yêu cầu:
-- 3 phương án hook cho 3 giây đầu, mỗi phương án nêu clip dùng.
-- Bảng theo giây: mỗi dòng 2–4 giây, ghi clip dùng (tên clip), lời thoại voice-over tiếng Việt, chữ màn hình ngắn (có thể để trống).
-- Caption 1–2 câu và 5–8 hashtag.
-- 3–5 ghi chú dựng ngắn cho editor (nhịp cắt, clip quay ngang, âm thanh).
-
-Chỉ trả về JSON đúng dạng:
-{"hooks":[{"line":"…","onscreen":"…","clip":"IMG_4685"}],"rows":[{"time":"0–3","clip":"IMG_4685","vo":"…","onscreen":"…"}],"caption":"…","hashtags":["#dalat"],"notes":["…"]}`;
-    const btn = $("scriptBtn"); btn.disabled = true;
-    setStatus($("scriptStatus"), "Đang viết kịch bản… (thường mất 20–60 giây)");
-    try {
-      const res = await sampleFn.json(prompt, { cache: false });
-      if (!res || !Array.isArray(res.rows)) throw { code: "invalid_json" };
-      script = res; renderScript();
-      setStatus($("scriptStatus"), "Đã viết xong. Bấm lại để có bản khác.", "ok");
-    } catch (e) {
-      const code = e && e.code;
-      setStatus($("scriptStatus"), code === "bad_key" ? "API key không đúng hoặc đã bị khoá." : code === "no_credit" ? "Tài khoản API hết tiền, nạp thêm ở console.anthropic.com." : code === "not_granted" ? "Bạn chưa cho phép trang dùng Claude." : code === "rate_limited" ? "Đang gọi AI quá nhiều, thử lại sau ít phút." : code === "invalid_json" ? "AI trả kết quả không đọc được. Bấm lại để thử lần nữa." : "Không viết được lúc này, thử lại sau.", "err");
-    } finally { btn.disabled = false; refreshButtons(); }
+  // ---------- kịch bản nháp theo mẫu (không cần AI) ----------
+  const VO = {
+    "Ăn uống": ["Mở màn bằng một bữa ăn nóng hổi.", "Ghé ăn một bữa cho đã."],
+    "Đồ ăn vặt": ["Không thể thiếu món ăn vặt nóng giòn.", "Ăn vặt một chút cho vui miệng."],
+    "Quán cà phê": ["Ghé một quán cà phê nhỏ ngồi chill.", "Cà phê một chút rồi đi tiếp."],
+    "Rừng cây, lá": ["Đi dạo giữa rừng cây, lá rụng đầy lối.", "Không khí trong lành, chỉ muốn ở mãi."],
+    "Vườn hoa": ["Hoa nở khắp nơi, chụp kiểu nào cũng đẹp."],
+    "Đồi núi": ["Lên đồi ngắm cảnh, gió mát rượi."],
+    "Trên xe": ["Trên đường di chuyển, cảnh dọc đường cũng đáng nhớ.", "Ngồi xe mà vẫn có chuyện dễ thương."],
+    "Phòng nghỉ": ["Về phòng nghỉ ngơi, mở cửa sổ ngắm một chút."],
+    "Dạo phố": ["Dạo một vòng phố, thấy gì cũng muốn ghé."],
+    "Chợ": ["Ghé chợ xem có gì ngon."],
+    "Biển": ["Ra biển hóng gió, nghe sóng vỗ."],
+    "Hồ, sông": ["Ngồi bên hồ, chậm lại một chút."],
+    "Thú cưng": ["Gặp thêm một bạn nhỏ dễ thương."],
+    "Makeup, mỹ phẩm": ["Makeup nhẹ nhàng trước khi đi."],
+    "Buổi tối": ["Tối đến, phố lên đèn."],
+    _: ["Tiếp tục hành trình.", "Thêm một chút khoảnh khắc."]
+  };
+  const TAGS = { "Ăn uống": "#reviewdoan", "Đồ ăn vặt": "#anvat", "Quán cà phê": "#cafe", "Rừng cây, lá": "#thiennhien", "Vườn hoa": "#vuonhoa", "Đồi núi": "#sanmay", "Biển": "#bien", "Phòng nghỉ": "#homestay", "Thú cưng": "#thucung", "Makeup, mỹ phẩm": "#makeup", "Dạo phố": "#daopho", "Chợ": "#cho" };
+  const slug = s => "#" + (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/gi, "d").replace(/[^a-z0-9]/gi, "").toLowerCase();
+  $("scriptBtn").addEventListener("click", () => {
+    const L = parseInt($("len").value, 10) || 45;
+    const proj = $("project").value.trim() || "chuyến đi";
+    const list = orderedScenes().filter(s => sceneClips(s).length);
+    if (!list.length) return;
+    const cn = c => c.name.replace(/\.[^.]+$/, "");
+    const lab = s => s.label || s.name;
+    const hookScene = list.find(s => /Rừng|Đồi|Biển|Hồ|Vườn|Buổi tối/.test(lab(s))) || list[0];
+    const hookClip = sceneClips(hookScene)[0];
+    const rows = [{ time: "0–3", clip: cn(hookClip), vo: `Một ngày ${proj} của mình, gặp gì quay nấy.`, onscreen: proj.toUpperCase() }];
+    let t = 3;
+    const per = (L - 6) / list.length;
+    list.forEach((s, si) => {
+      let cs = sceneClips(s); if (cs.length > 1) cs = cs.filter(c => c !== hookClip);
+      const nRows = Math.max(1, Math.min(cs.length, Math.round(per / 2.5)));
+      const step = per / nRows;
+      for (let r = 0; r < nRows; r++) {
+        const c = cs[Math.floor(r * cs.length / nRows)];
+        rows.push({ time: Math.round(t) + "–" + Math.round(t + step), clip: cn(c), vo: r === 0 ? (VO[lab(s)] || VO._)[si % (VO[lab(s)] || VO._).length] : "", onscreen: r === 0 ? s.name : "" });
+        t += step;
+      }
+    });
+    const lastC = sceneClips(list[list.length - 1]).slice(-1)[0];
+    rows.push({ time: Math.round(t) + "–" + L, clip: cn(lastC), vo: `${proj} vậy là đủ. Lưu lại cho chuyến sau nha.`, onscreen: "LƯU LẠI CHO CHUYẾN SAU" });
+    const food = list.find(s => /Ăn|vặt|cà phê/i.test(lab(s))) || list[0];
+    const landscape = clips.filter(c => c.landscape).map(cn);
+    script = {
+      hooks: [
+        { line: `Một ngày ${proj} của mình, gặp gì quay nấy.`, onscreen: proj.toUpperCase(), clip: cn(hookClip) },
+        { line: `${list.length} khoảnh khắc trong một ngày ở ${proj}.`, onscreen: `${list.length} KHOẢNH KHẮC`, clip: cn(sceneClips(food)[0]) },
+        { line: `Lưu lại nếu bạn sắp đi ${proj}.`, onscreen: "LƯU LẠI NHÉ", clip: cn(clips[0]) }
+      ],
+      rows,
+      caption: `Một ngày ${proj}: ` + [...new Set(list.map(s => s.name.replace(/\s+\d+$/, "").toLowerCase()))].join(" · ") + ".",
+      hashtags: [...new Set(["#vlog", "#dulich", slug(proj), ...list.map(s => TAGS[lab(s)]).filter(Boolean)])].slice(0, 8),
+      notes: [
+        "Cắt theo nhịp nhạc, mỗi clip 1,5–3 giây; giữ lâu hơn ở cảnh mở và cảnh kết.",
+        landscape.length ? `Clip quay ngang cần crop hoặc để nền mờ: ${landscape.join(", ")}.` : "Toàn bộ clip quay dọc, dựng 9:16 thẳng.",
+        "Thêm tiếng động thật (tiếng ăn, tiếng lá, tiếng xe) để video đỡ khô.",
+        "Đây là bản nháp theo mẫu: sửa lời thoại cho đúng tên món, tên quán và giọng của bạn."
+      ]
+    };
+    renderScript();
+    setStatus($("scriptStatus"), "Đã tạo bản nháp theo mẫu từ các cảnh đã chia. Sửa lời cho tự nhiên trước khi gửi editor.", "ok");
   });
 
   function renderScript() {
@@ -892,13 +1011,13 @@ Chỉ trả về JSON đúng dạng:
     const has = clips.length > 0 && !loading;
     const sorted = scenes.length > 0 && clips.every(c => c.scene);
     $("timeBtn").disabled = !has;
-    $("autoBtn").disabled = !has || !sampleFn;
-    $("autoBtn").title = sampleFn ? "" : "Nhập API key ở trên để bật AI";
-    $("scriptBtn").disabled = !sorted || !sampleFn || loading;
+    $("autoBtn").disabled = !has;
+    $("resortBtn").disabled = !has;
+    $("scriptBtn").disabled = !sorted || loading;
     $("zipBtn").disabled = !sorted || !downloads || loading;
     $("zipBtn").hidden = !downloads && sorted;
     $("copyList").disabled = !sorted;
-    if (sorted && /^(Chia cảnh|Viết kịch bản cần)/.test($("scriptStatus").textContent)) setStatus($("scriptStatus"), sampleFn ? "Sẵn sàng. Chọn độ dài rồi bấm “Viết kịch bản”." : "Viết kịch bản cần API key ở bước 2.");
+    if (sorted && /^Chia cảnh/.test($("scriptStatus").textContent)) setStatus($("scriptStatus"), "Sẵn sàng. Chọn độ dài rồi bấm “Tạo kịch bản nháp”.");
     $("moveBtn").hidden = !(dirHandle && sorted && clips.every(c => c.handle));
     $("moveBtn").disabled = loading;
   }
