@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quản lý kịch bản</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --surface: #ffffff;
+    --surface-2: #f0f2f5;
+    --border: #dfe3e8;
+    --text: #1d2430;
+    --muted: #6b7482;
+    --accent: #2f5bea;
+    --accent-soft: #e8eefe;
+    --fb1: #fff6e0;
+    --fb2: #e9f7ef;
+    --fb-head: #fdecc8;
+    --fb2-head: #cfeedd;
+    --danger: #d64545;
+    --warn: #c98400;
+    --ok: #1f8a4c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151b;
+      --surface: #1a1e26;
+      --surface-2: #222733;
+      --border: #2e3442;
+      --text: #e6e9ef;
+      --muted: #949cab;
+      --accent: #7c9bff;
+      --accent-soft: #23304f;
+      --fb1: #2a2415;
+      --fb2: #16281f;
+      --fb-head: #3a3018;
+      --fb2-head: #1d3a2b;
+      --danger: #ff7a7a;
+      --warn: #f0b84a;
+      --ok: #5fd08f;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151b;
+    --surface: #1a1e26;
+    --surface-2: #222733;
+    --border: #2e3442;
+    --text: #e6e9ef;
+    --muted: #949cab;
+    --accent: #7c9bff;
+    --accent-soft: #23304f;
+    --fb1: #2a2415;
+    --fb2: #16281f;
+    --fb-head: #3a3018;
+    --fb2-head: #1d3a2b;
+    --danger: #ff7a7a;
+    --warn: #f0b84a;
+    --ok: #5fd08f;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Be Vietnam Pro", system-ui, sans-serif;
+    font-size: 14px;
+  }
+  .wrap { max-width: 1600px; margin: 0 auto; padding: 24px 16px 48px; }
+
+  header {
+    display: flex; flex-wrap: wrap; gap: 12px;
+    align-items: center; justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  h1 { font-size: 22px; margin: 0; font-weight: 700; }
+  .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  button, .btn {
+    font: inherit; font-size: 13px; font-weight: 500;
+    border: 1px solid var(--border); background: var(--surface);
+    color: var(--text); padding: 8px 12px; border-radius: 8px;
+    cursor: pointer; white-space: nowrap;
+  }
+  button:hover, .btn:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  input[type="search"] {
+    font: inherit; font-size: 13px; padding: 8px 12px; width: 220px; max-width: 100%;
+    border: 1px solid var(--border); border-radius: 8px;
+    background: var(--surface); color: var(--text);
+  }
+
+  .table-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow-x: auto;
+  }
+  table { border-collapse: collapse; width: 100%; min-width: 1400px; }
+  th, td { border: 1px solid var(--border); vertical-align: top; }
+  thead th {
+    background: var(--surface-2);
+    font-weight: 600; font-size: 13px; text-align: center;
+    padding: 10px 8px; position: sticky; top: 0; z-index: 1;
+  }
+  thead th.fb { background: var(--fb-head); }
+  thead th.r1 { background: var(--fb-head); }
+  thead th.r2 { background: var(--fb2-head); }
+  td { padding: 0; }
+  td.stt { text-align: center; color: var(--muted); padding: 10px 6px; width: 44px; }
+  td.r1 { background: var(--fb1); }
+  td.r2 { background: var(--fb2); }
+  td.act { width: 44px; text-align: center; padding: 6px 4px; }
+
+  textarea, td input {
+    width: 100%; border: 0; background: transparent; color: var(--text);
+    font: inherit; padding: 10px; resize: none; outline: none;
+    min-height: 40px; display: block; line-height: 1.45;
+  }
+  textarea:focus, td input:focus { box-shadow: inset 0 0 0 2px var(--accent); border-radius: 2px; }
+  td input[type="date"] { color-scheme: light dark; }
+
+  .cell-link { position: relative; }
+  .cell-link a {
+    position: absolute; right: 4px; bottom: 4px;
+    font-size: 11px; text-decoration: none; color: var(--accent);
+    background: var(--accent-soft); padding: 2px 6px; border-radius: 6px;
+  }
+  .dl-note { font-size: 11px; padding: 0 10px 8px; font-weight: 600; }
+  .dl-over { color: var(--danger); }
+  .dl-soon { color: var(--warn); }
+  .dl-ok { color: var(--ok); }
+
+  .del {
+    border: 0; background: transparent; color: var(--muted);
+    padding: 6px; font-size: 16px; line-height: 1;
+  }
+  .del:hover { color: var(--danger); }
+
+  .empty { text-align: center; color: var(--muted); padding: 32px; }
+  .foot { color: var(--muted); font-size: 12px; margin-top: 10px; }
+
+  /* column widths */
+  col.c-stt { width: 44px; }
+  col.c-kb { width: 22%; }
+  col.c-src { width: 11%; }
+  col.c-note { width: 12%; }
+  col.c-pic { width: 9%; }
+  col.c-dl { width: 9%; }
+  col.c-insp { width: 11%; }
+  col.c-r1 { width: 12%; }
+  col.c-r2 { width: 12%; }
+  col.c-act { width: 44px; }
+
+  @media (max-width: 640px) {
+    h1 { font-size: 19px; }
+    input[type="search"] { width: 100%; }
+    .toolbar { width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Quản lý kịch bản</h1>
+      <div class="sub">Gõ thẳng vào ô để sửa — dữ liệu tự lưu trên trình duyệt này.</div>
+    </div>
+    <div class="toolbar">
+      <input type="search" id="search" placeholder="Tìm kịch bản, người phụ trách…">
+      <button class="primary" id="add">+ Thêm dòng</button>
+      <button id="csv">Xuất Excel (CSV)</button>
+      <button id="exp">Sao lưu</button>
+      <label class="btn" for="imp">Mở bản sao lưu</label>
+      <input type="file" id="imp" accept=".json" hidden>
+    </div>
+  </header>
+
+  <div class="table-box">
+    <table>
+      <colgroup>
+        <col class="c-stt"><col class="c-kb"><col class="c-src"><col class="c-note">
+        <col class="c-pic"><col class="c-dl"><col class="c-insp"><col class="c-r1"><col class="c-r2"><col class="c-act">
+      </colgroup>
+      <thead>
+        <tr>
+          <th rowspan="2">#</th>
+          <th rowspan="2">Kịch bản</th>
+          <th rowspan="2">Source</th>
+          <th rowspan="2">Note</th>
+          <th rowspan="2">Người phụ trách</th>
+          <th rowspan="2">Deadline</th>
+          <th rowspan="2">Inspo</th>
+          <th colspan="2" class="fb">Feedback</th>
+          <th rowspan="2"></th>
+        </tr>
+        <tr>
+          <th class="r1">Round 1</th>
+          <th class="r2">Round 2</th>
+        </tr>
+      </thead>
+      <tbody id="body"></tbody>
+    </table>
+  </div>
+  <div class="foot" id="foot"></div>
+</div>
+
+<script>
+const KEY = "quan-ly-kich-ban-v1";
+const FIELDS = ["kichBan", "source", "note", "phuTrach", "deadline", "inspo", "fb1", "fb2"];
+const LABELS = ["Kịch bản", "Source", "Note", "Người phụ trách", "Deadline", "Inspo", "Feedback Round 1", "Feedback Round 2"];
+const LINK_FIELDS = ["source", "inspo"];
+
+let rows = load();
+if (!rows.length) rows = [blank(), blank(), blank()];
+
+function blank() {
+  const r = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7) };
+  FIELDS.forEach(f => r[f] = "");
+  return r;
+}
+function load() {
+  try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) { return []; }
+}
+function save() {
+  try { localStorage.setItem(KEY, JSON.stringify(rows)); } catch (e) {}
+  updateFoot();
+}
+
+function firstUrl(text) {
+  const m = (text || "").match(/https?:\/\/\S+/);
+  return m ? m[0] : null;
+}
+function deadlineInfo(v) {
+  if (!v) return null;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const d = new Date(v + "T00:00:00");
+  const diff = Math.round((d - today) / 86400000);
+  if (diff < 0) return { cls: "dl-over", txt: "Trễ " + (-diff) + " ngày" };
+  if (diff === 0) return { cls: "dl-soon", txt: "Hôm nay" };
+  if (diff <= 2) return { cls: "dl-soon", txt: "Còn " + diff + " ngày" };
+  return { cls: "dl-ok", txt: "Còn " + diff + " ngày" };
+}
+function autosize(el) { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; }
+
+function render() {
+  const q = document.getElementById("search").value.trim().toLowerCase();
+  const body = document.getElementById("body");
+  body.innerHTML = "";
+  const list = rows.filter(r => !q || FIELDS.some(f => (r[f] || "").toLowerCase().includes(q)));
+  if (!list.length) {
+    body.innerHTML = '<tr><td colspan="10" class="empty">' + (q ? "Không tìm thấy dòng nào." : "Chưa có dòng nào — bấm “+ Thêm dòng”.") + "</td></tr>";
+    return;
+  }
+  list.forEach(r => {
+    const tr = document.createElement("tr");
+    const stt = document.createElement("td");
+    stt.className = "stt";
+    stt.textContent = rows.indexOf(r) + 1;
+    tr.appendChild(stt);
+
+    FIELDS.forEach(f => {
+      const td = document.createElement("td");
+      if (f === "fb1") td.className = "r1";
+      if (f === "fb2") td.className = "r2";
+
+      if (f === "deadline") {
+        const inp = document.createElement("input");
+        inp.type = "date";
+        inp.value = r.deadline;
+        const note = document.createElement("div");
+        const paint = () => {
+          const info = deadlineInfo(inp.value);
+          note.className = "dl-note " + (info ? info.cls : "");
+          note.textContent = info ? info.txt : "";
+        };
+        inp.addEventListener("input", () => { r.deadline = inp.value; paint(); save(); });
+        paint();
+        td.append(inp, note);
+      } else {
+        const ta = document.createElement("textarea");
+        ta.rows = 1;
+        ta.value = r[f];
+        ta.placeholder = f === "kichBan" ? "Tên / nội dung kịch bản" : "";
+        let link = null;
+        if (LINK_FIELDS.includes(f)) {
+          td.classList.add("cell-link");
+          link = document.createElement("a");
+          link.target = "_blank"; link.rel = "noopener";
+          link.textContent = "Mở ↗";
+        }
+        const paintLink = () => {
+          if (!link) return;
+          const u = firstUrl(ta.value);
+          if (u) { link.href = u; if (!link.isConnected) td.appendChild(link); }
+          else if (link.isConnected) link.remove();
+        };
+        ta.addEventListener("input", () => { r[f] = ta.value; autosize(ta); paintLink(); save(); });
+        td.appendChild(ta);
+        paintLink();
+        requestAnimationFrame(() => autosize(ta));
+      }
+      tr.appendChild(td);
+    });
+
+    const act = document.createElement("td");
+    act.className = "act";
+    const del = document.createElement("button");
+    del.className = "del"; del.title = "Xoá dòng"; del.textContent = "✕";
+    del.addEventListener("click", () => {
+      const hasData = FIELDS.some(f => r[f]);
+      if (hasData && !confirm("Xoá dòng này?")) return;
+      rows = rows.filter(x => x !== r);
+      save(); render();
+    });
+    act.appendChild(del);
+    tr.appendChild(act);
+    body.appendChild(tr);
+  });
+}
+
+function updateFoot() {
+  const filled = rows.filter(r => r.kichBan.trim()).length;
+  const over = rows.filter(r => { const i = deadlineInfo(r.deadline); return i && i.cls === "dl-over"; }).length;
+  document.getElementById("foot").textContent =
+    rows.length + " dòng · " + filled + " kịch bản đã có tên" + (over ? " · " + over + " dòng trễ deadline" : "");
+}
+
+function download(name, content, type) {
+  const blob = new Blob([content], { type });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+const stamp = () => new Date().toISOString().slice(0, 10);
+
+document.getElementById("add").addEventListener("click", () => {
+  rows.push(blank()); save();
+  document.getElementById("search").value = "";
+  render();
+  const tas = document.querySelectorAll("#body tr:last-child textarea");
+  if (tas[0]) tas[0].focus();
+});
+document.getElementById("search").addEventListener("input", render);
+document.getElementById("csv").addEventListener("click", () => {
+  const esc = v => '"' + String(v || "").replace(/"/g, '""') + '"';
+  const lines = [["#"].concat(LABELS).map(esc).join(",")];
+  rows.forEach((r, i) => lines.push([i + 1].concat(FIELDS.map(f => r[f])).map(esc).join(",")));
+  download("kich-ban-" + stamp() + ".csv", "﻿" + lines.join("\r\n"), "text/csv;charset=utf-8");
+});
+document.getElementById("exp").addEventListener("click", () => {
+  download("kich-ban-saoluu-" + stamp() + ".json", JSON.stringify(rows, null, 2), "application/json");
+});
+document.getElementById("imp").addEventListener("change", e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      if (!Array.isArray(data)) throw 0;
+      if (!confirm("Thay toàn bộ bảng hiện tại bằng bản sao lưu này?")) return;
+      rows = data.map(d => { const r = blank(); FIELDS.forEach(f => r[f] = String(d[f] || "")); return r; });
+      save(); render();
+    } catch (err) { alert("File sao lưu không hợp lệ."); }
+    e.target.value = "";
+  };
+  reader.readAsText(file);
+});
+window.addEventListener("resize", () => document.querySelectorAll("#body textarea").forEach(autosize));
+
+render();
+updateFoot();
+</script>
+</body>
+</html>

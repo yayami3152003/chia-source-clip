@@ -1,0 +1,908 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chia Source Clip</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* Layout: single column workflow — drop zone, clip strip, scene folders, script, export */
+  :root {
+    --bg: #f5f3ef;
+    --surface: #ffffff;
+    --surface-2: #efebe4;
+    --border: #e0d9cf;
+    --text: #23201c;
+    --muted: #736b60;
+    --accent: #8a4b26;
+    --accent-soft: #f3e6dc;
+    --on-accent: #ffffff;
+    --ok: #2f7d4b;
+    --warn: #a86a00;
+    --danger: #c0392b;
+    --font: "Be Vietnam Pro", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #161411;
+      --surface: #1f1c18;
+      --surface-2: #2a2620;
+      --border: #3a342c;
+      --text: #ece6dd;
+      --muted: #a69c8e;
+      --accent: #e0a37a;
+      --accent-soft: #3a2a1f;
+      --on-accent: #1a120c;
+      --ok: #6fcf91;
+      --warn: #f0b84a;
+      --danger: #ff8a7a;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #161411;
+    --surface: #1f1c18;
+    --surface-2: #2a2620;
+    --border: #3a342c;
+    --text: #ece6dd;
+    --muted: #a69c8e;
+    --accent: #e0a37a;
+    --accent-soft: #3a2a1f;
+    --on-accent: #1a120c;
+    --ok: #6fcf91;
+    --warn: #f0b84a;
+    --danger: #ff8a7a;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; line-height: 1.5; }
+  .wrap {
+    max-width: 1100px; margin: 0 auto;
+    padding-block: 28px 64px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    display: flex; flex-direction: column; gap: 22px;
+  }
+  h1 { margin: 0; font-size: 24px; font-weight: 700; text-wrap: balance; }
+  h2 { margin: 0; font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+  .step { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-size: 12px; font-weight: 700; flex: none; }
+  .lead { color: var(--muted); margin: 6px 0 0; max-width: 65ch; }
+  section { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .muted { color: var(--muted); }
+  .small { font-size: 12px; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .grow { flex: 1 1 200px; min-width: 0; }
+
+  button, .btn {
+    font: inherit; font-size: 13px; font-weight: 600;
+    border: 1px solid var(--border); background: var(--surface); color: var(--text);
+    padding: 9px 14px; border-radius: 9px; cursor: pointer; white-space: nowrap;
+  }
+  button:hover:not(:disabled), .btn:hover { border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  button.ghost { border-color: transparent; background: transparent; color: var(--muted); padding: 6px 8px; }
+  button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, .drop:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  input[type="text"], select, textarea {
+    font: inherit; font-size: 13px; color: var(--text); background: var(--surface);
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; min-width: 0;
+  }
+  textarea { width: 100%; resize: vertical; }
+  label.field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); font-weight: 500; }
+
+  .drop {
+    border: 2px dashed var(--border); border-radius: 12px; padding: 28px 16px; text-align: center;
+    background: var(--surface-2); cursor: pointer; transition: border-color .15s, background .15s;
+  }
+  .drop.over { border-color: var(--accent); background: var(--accent-soft); }
+  .drop strong { display: block; font-size: 15px; margin-bottom: 4px; }
+
+  .status { font-size: 13px; color: var(--muted); }
+  .status.err { color: var(--danger); }
+  .status.ok { color: var(--ok); }
+  .bar { height: 6px; background: var(--surface-2); border-radius: 99px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+
+  .clips { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 10px; }
+  .clip { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .thumb { position: relative; aspect-ratio: 3 / 4; max-width: 100%; border-radius: 8px; overflow: hidden; background: var(--surface-2); }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .thumb .no { position: absolute; inset: 0; display: grid; place-items: center; font-size: 11px; color: var(--muted); padding: 6px; text-align: center; }
+  .badge { position: absolute; left: 4px; top: 4px; background: rgba(0,0,0,.68); color: #fff; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 6px; font-variant-numeric: tabular-nums; }
+  .dur { position: absolute; right: 4px; bottom: 4px; background: rgba(0,0,0,.68); color: #fff; font-size: 10px; padding: 1px 5px; border-radius: 5px; font-variant-numeric: tabular-nums; }
+  .clip .name { font-size: 11px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .clip .meta { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .clip .desc { font-size: 11px; color: var(--muted); line-height: 1.35; }
+  .clip select { font-size: 11px; padding: 4px 6px; }
+
+  .scenes { display: flex; flex-direction: column; gap: 14px; }
+  .scene { border: 1px solid var(--border); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 10px; background: var(--surface); }
+  .scene-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .scene-head .path { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .scene-head input { flex: 1 1 200px; font-weight: 600; font-size: 14px; }
+  .chip { font-size: 11px; background: var(--accent-soft); color: var(--accent); padding: 2px 8px; border-radius: 99px; font-weight: 600; white-space: nowrap; }
+
+  .table-box { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
+  table { border-collapse: collapse; width: 100%; min-width: 640px; }
+  th, td { border-bottom: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; font-size: 13px; }
+  th { background: var(--surface-2); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  td.t { white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--muted); }
+  td.c { white-space: nowrap; font-weight: 600; }
+  .hooks { display: grid; gap: 8px; }
+  .hook { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+  .hook b { color: var(--accent); }
+  pre.out { white-space: pre-wrap; font-family: inherit; font-size: 13px; background: var(--surface-2); padding: 12px; border-radius: 10px; margin: 0; max-height: 260px; overflow: auto; }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <h1>Chia Source Clip</h1>
+    <p class="lead">Kéo clip MP4 hoặc MOV vào đây. Trang đọc giờ quay, xem hình từng clip, tự chia thành Ngày › Cảnh và đặt tên. Xong thì viết kịch bản, rồi chia luôn vào thư mục trên máy hoặc tải về file .zip đã chia sẵn để đưa editor. Clip không bị tải lên đâu cả: chỉ ảnh nhỏ của từng clip được gửi cho AI khi bạn bật AI.</p>
+  </header>
+
+  <section aria-labelledby="s1">
+    <h2 id="s1"><span class="step">1</span>Chọn clip</h2>
+    <div class="drop" id="drop" tabindex="0" role="button" aria-label="Chọn hoặc kéo thả clip">
+      <strong>Kéo thả clip vào đây</strong>
+      <span class="muted">hoặc bấm để chọn file · MP4, MOV · chọn nhiều file cùng lúc</span>
+    </div>
+    <input type="file" id="pick" accept="video/*,.mp4,.mov,.m4v" multiple hidden>
+    <div class="row">
+      <button id="pickDir" hidden>Chọn cả thư mục clip (chia thẳng trên máy)</button>
+      <span class="muted small">Chọn thư mục thì ở bước 4 có nút chia luôn vào thư mục con, không cần tải .zip.</span>
+    </div>
+    <div class="row">
+      <label class="field grow">Tên dự án (tên thư mục ngoài cùng)
+        <input type="text" id="project" value="Thập cẩm Đà Lạt">
+      </label>
+      <label class="field">Tên ngày đặt trước số
+        <input type="text" id="dayPrefix" value="Ngày" style="width:140px">
+      </label>
+    </div>
+    <div class="status" id="loadStatus" aria-live="polite">Chưa có clip nào.</div>
+    <div class="bar" id="loadBar" hidden><i></i></div>
+    <div class="clips" id="clipGrid"></div>
+  </section>
+
+  <section aria-labelledby="s2">
+    <h2 id="s2"><span class="step">2</span>Chia cảnh</h2>
+    <div class="row">
+      <label class="field grow">API key Claude (để AI xem hình, chia cảnh và viết kịch bản; không bắt buộc)
+        <input type="password" id="apiKey" placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
+      </label>
+      <label class="small row" style="gap:6px"><input type="checkbox" id="rememberKey"> Nhớ key trên máy này</label>
+      <button id="keyBtn">Bật AI</button>
+      <button class="ghost" id="keyClear">Xoá key</button>
+    </div>
+    <div class="status small" id="keyStatus">Chưa có key: vẫn chia theo giờ quay được. Key tạo ở console.anthropic.com, trả phí theo lượt dùng (mỗi lần chia khoảng vài nghìn đồng). Key chỉ gửi thẳng tới Claude, không đi đâu khác.</div>
+    <div class="row">
+      <button class="primary" id="autoBtn" disabled>Để AI xem hình và chia cảnh</button>
+      <button id="timeBtn" disabled>Chỉ chia theo giờ quay</button>
+      <label class="field">Cách nhau quá (phút) là cảnh mới
+        <input type="text" id="gap" value="30" inputmode="numeric" style="width:90px">
+      </label>
+    </div>
+    <div class="status" id="sortStatus" aria-live="polite">Chọn clip ở bước 1 trước.</div>
+    <div class="scenes" id="scenes"></div>
+    <div class="row" id="sceneTools" hidden>
+      <button id="addScene">+ Thêm cảnh trống</button>
+      <span class="muted small">Đổi tên cảnh ngay trong ô. Chuyển clip sang cảnh khác bằng ô chọn dưới mỗi clip.</span>
+    </div>
+  </section>
+
+  <section aria-labelledby="s3">
+    <h2 id="s3"><span class="step">3</span>Viết kịch bản</h2>
+    <div class="row">
+      <label class="field">Độ dài
+        <select id="len"><option>30 giây</option><option selected>45 giây</option><option>60 giây</option><option>90 giây</option></select>
+      </label>
+      <label class="field grow">Giọng / phong cách
+        <input type="text" id="style" value="Vlog TikTok nhẹ nhàng, tối giản, voice-over xưng “mình”">
+      </label>
+      <button class="primary" id="scriptBtn" disabled>Viết kịch bản</button>
+    </div>
+    <div class="status" id="scriptStatus" aria-live="polite">Chia cảnh ở bước 2 trước.</div>
+    <div id="scriptOut" hidden>
+      <div class="hooks" id="hooks"></div>
+      <div class="table-box"><table>
+        <thead><tr><th>Giây</th><th>Clip</th><th>Lời thoại</th><th>Chữ màn hình</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table></div>
+      <div id="extra"></div>
+      <div class="row"><button id="copyScript">Copy kịch bản</button></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="s4">
+    <h2 id="s4"><span class="step">4</span>Xuất cho editor</h2>
+    <div class="row">
+      <button class="primary" id="moveBtn" hidden>Chia luôn trong thư mục đã chọn</button>
+      <button class="primary" id="zipBtn" disabled>Tải .zip đã chia thư mục</button>
+      <button id="copyList" disabled>Copy danh sách (dán vào cột Source)</button>
+    </div>
+    <div class="status" id="zipStatus" aria-live="polite">File .zip giữ nguyên clip gốc, không nén lại, chất lượng không đổi. Trong zip có kèm file danh sách và kịch bản.</div>
+    <div class="bar" id="zipBar" hidden><i></i></div>
+    <div id="perScene" class="row"></div>
+    <pre class="out" id="listOut" hidden></pre>
+  </section>
+</div>
+
+<script>
+(function () {
+  const $ = id => document.getElementById(id);
+  const clips = [];      // {id, file, name, size, time:Date, timeFrom, dur, thumbUrl, thumbImg, ok, desc, scene}
+  let scenes = [];       // {id, name}
+  let script = null;
+  let sampleFn = null, downloads = null, imgLimits = null;
+  let sceneSeq = 0;
+
+  // ---------- chạy độc lập: AI bằng API key riêng, tải file bằng trình duyệt ----------
+  const KEY_STORE = "chia-source-anthropic-key";
+  const SDK_URL = "https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@1.3.0/+esm";
+  let AnthropicCls = null;
+
+  downloads = {
+    save: async ({ filename, data }) => {
+      const url = URL.createObjectURL(data instanceof Blob ? data : new Blob([data]));
+      const a = document.createElement("a"); a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      return { status: "saved" };
+    }
+  };
+
+  function blobToB64(blob) {
+    return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1]); r.onerror = rej; r.readAsDataURL(blob); });
+  }
+  function parseJsonLoose(text) {
+    try { return JSON.parse(text); } catch (e) {}
+    const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/); if (fence) { try { return JSON.parse(fence[1]); } catch (e) {} }
+    const a = text.search(/[\[{]/), b = Math.max(text.lastIndexOf("}"), text.lastIndexOf("]"));
+    if (a >= 0 && b > a) { try { return JSON.parse(text.slice(a, b + 1)); } catch (e) {} }
+    throw { code: "invalid_json" };
+  }
+  async function makeSample(key) {
+    if (!AnthropicCls) AnthropicCls = (await import(SDK_URL)).default;
+    const client = new AnthropicCls({ apiKey: key, dangerouslyAllowBrowser: true });
+    const fn = {};
+    fn.limits = async () => ({ images: { maxCount: 20 } });
+    fn.json = async (prompt, opts = {}) => {
+      const content = [];
+      for (const b of [].concat(opts.images || [])) content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: await blobToB64(b) } });
+      content.push({ type: "text", text: prompt });
+      let msg;
+      try {
+        msg = await client.beta.messages.create({
+          model: "claude-opus-5-5",
+          max_tokens: 16000,
+          betas: ["server-side-fallback-2026-07-01"],
+          fallbacks: "default",
+          output_config: { effort: "medium" },
+          messages: [{ role: "user", content }]
+        }, { signal: opts.signal });
+      } catch (e) {
+        if (opts.signal && opts.signal.aborted) throw { code: "cancelled" };
+        if (e && (e.status === 401 || e.status === 403)) throw { code: "bad_key" };
+        if (e && e.status === 429) throw { code: "rate_limited" };
+        if (e && e.status === 400 && /credit|billing/i.test(String(e.message))) throw { code: "no_credit" };
+        throw { code: "upstream_error" };
+      }
+      if (msg.stop_reason === "refusal") throw { code: "refused" };
+      const text = msg.content.filter(b => b.type === "text").map(b => b.text).join("");
+      return parseJsonLoose(text);
+    };
+    return fn;
+  }
+  async function useKey(key, remember) {
+    const st = $("keyStatus");
+    if (!key) { sampleFn = null; imgLimits = null; setStatus(st, "Chưa có key: vẫn chia theo giờ quay được, AI và viết kịch bản tạm tắt."); refreshButtons(); return; }
+    try {
+      sampleFn = await makeSample(key);
+      imgLimits = (await sampleFn.limits()).images;
+      try { remember ? localStorage.setItem(KEY_STORE, key) : localStorage.removeItem(KEY_STORE); } catch (e) {}
+      setStatus(st, remember ? "Đã bật AI. Key được lưu trên trình duyệt của máy này." : "Đã bật AI cho lần mở trang này (không lưu key).", "ok");
+    } catch (e) {
+      sampleFn = null;
+      setStatus(st, "Không tải được bộ kết nối Claude. Kiểm tra mạng rồi bấm lại.", "err");
+    }
+    refreshButtons();
+  }
+  $("keyBtn").addEventListener("click", () => useKey($("apiKey").value.trim(), $("rememberKey").checked));
+  $("keyClear").addEventListener("click", () => { $("apiKey").value = ""; try { localStorage.removeItem(KEY_STORE); } catch (e) {} useKey("", false); });
+  setTimeout(() => {
+    let saved = ""; try { saved = localStorage.getItem(KEY_STORE) || ""; } catch (e) {}
+    if (saved) { $("apiKey").value = saved; $("rememberKey").checked = true; useKey(saved, true); }
+    else refreshButtons();
+  }, 0);
+
+  // ---------- helpers ----------
+  const pad = n => String(n).padStart(2, "0");
+  const fmtTime = d => pad(d.getHours()) + ":" + pad(d.getMinutes());
+  const fmtDate = d => pad(d.getDate()) + "/" + pad(d.getMonth() + 1);
+  const fmtDur = s => isFinite(s) && s > 0 ? Math.floor(s / 60) + ":" + pad(Math.round(s % 60)) : "";
+  const fmtMB = b => (b / 1048576).toFixed(1) + " MB";
+  const dayKey = d => d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+  const safe = s => (s || "").replace(/[\\/:*?"<>|\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim().replace(/\.+$/, "") || "Chưa đặt tên";
+  function setStatus(el, text, kind) { el.textContent = text; el.className = "status" + (kind ? " " + kind : ""); }
+  function setBar(el, frac) { el.hidden = frac == null; if (frac != null) el.firstElementChild.style.width = Math.round(frac * 100) + "%"; }
+
+  // ---------- read shot time from MP4/MOV (mvhd creation_time) ----------
+  async function readBytes(file, start, len) { return new DataView(await file.slice(start, start + len).arrayBuffer()); }
+  async function shotTime(file) {
+    try {
+      let off = 0;
+      for (let guard = 0; guard < 64 && off + 8 <= file.size; guard++) {
+        const h = await readBytes(file, off, 16);
+        let size = h.getUint32(0);
+        const type = String.fromCharCode(h.getUint8(4), h.getUint8(5), h.getUint8(6), h.getUint8(7));
+        let hdr = 8;
+        if (size === 1) { size = Number(h.getBigUint64(8)); hdr = 16; }
+        else if (size === 0) size = file.size - off;
+        if (size < 8) break;
+        if (type === "moov") {
+          const len = Math.min(size, 64 * 1048576);
+          const m = await readBytes(file, off, len);
+          let p = hdr;
+          while (p + 8 <= len) {
+            const s = m.getUint32(p);
+            const t = String.fromCharCode(m.getUint8(p + 4), m.getUint8(p + 5), m.getUint8(p + 6), m.getUint8(p + 7));
+            if (t === "mvhd") {
+              const ver = m.getUint8(p + 8);
+              const secs = ver === 1 ? Number(m.getBigUint64(p + 12)) : m.getUint32(p + 12);
+              const unix = secs - 2082844800;
+              if (unix > 946684800 && unix < 4102444800) return new Date(unix * 1000);
+              return null;
+            }
+            if (s < 8) break;
+            p += s;
+          }
+          return null;
+        }
+        off += size;
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  // ---------- grab one frame ----------
+  const video = document.createElement("video");
+  video.muted = true; video.playsInline = true; video.preload = "auto";
+  function grabFrame(file) {
+    return new Promise(resolve => {
+      const url = URL.createObjectURL(file);
+      let done = false;
+      const finish = (res) => { if (done) return; done = true; clearTimeout(timer); video.removeAttribute("src"); video.load(); URL.revokeObjectURL(url); resolve(res); };
+      const timer = setTimeout(() => finish({ ok: false, dur: video.duration }), 15000);
+      video.onerror = () => finish({ ok: false, dur: NaN });
+      video.onloadedmetadata = () => {
+        const d = video.duration;
+        video.currentTime = isFinite(d) && d > 0 ? Math.min(d * 0.4, Math.max(0.3, d - 0.2)) : 0.5;
+      };
+      video.onseeked = () => {
+        try {
+          const W = 300, H = 400;
+          const c = document.createElement("canvas"); c.width = W; c.height = H;
+          const g = c.getContext("2d");
+          const vw = video.videoWidth, vh = video.videoHeight;
+          if (!vw || !vh) return finish({ ok: false, dur: video.duration });
+          g.fillStyle = "#000"; g.fillRect(0, 0, W, H);
+          const sc = Math.min(W / vw, H / vh);
+          const dw = vw * sc, dh = vh * sc;
+          g.drawImage(video, (W - dw) / 2, (H - dh) / 2, dw, dh);
+          c.toBlob(b => finish({ ok: !!b, dur: video.duration, blob: b, landscape: vw > vh }), "image/jpeg", 0.82);
+        } catch (e) { finish({ ok: false, dur: video.duration }); }
+      };
+      video.src = url;
+    });
+  }
+
+  // ---------- add files ----------
+  const drop = $("drop"), pick = $("pick");
+  drop.addEventListener("click", () => pick.click());
+  drop.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick.click(); } });
+  drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("over"); });
+  drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+  drop.addEventListener("drop", e => { e.preventDefault(); drop.classList.remove("over"); addFiles(e.dataTransfer.files); });
+  pick.addEventListener("change", () => { addFiles(pick.files); pick.value = ""; });
+
+  // ---------- chọn cả thư mục để chia thẳng trên máy (Chrome / Edge) ----------
+  let dirHandle = null;
+  const handleOf = new WeakMap();
+  if (window.showDirectoryPicker) {
+    $("pickDir").hidden = false;
+    $("pickDir").addEventListener("click", async () => {
+      try {
+        const dh = await window.showDirectoryPicker({ mode: "readwrite" });
+        const files = [];
+        for await (const [name, h] of dh.entries()) {
+          if (h.kind === "file" && /\.(mp4|mov|m4v)$/i.test(name)) { const f = await h.getFile(); handleOf.set(f, h); files.push(f); }
+        }
+        if (clips.length && dirHandle !== dh) { clips.length = 0; scenes = []; renderScenes(); }
+        dirHandle = dh;
+        $("project").value = dh.name;
+        await addFiles(files);
+      } catch (e) { if (e && e.name !== "AbortError") setStatus($("loadStatus"), "Không mở được thư mục này.", "err"); }
+    });
+  }
+
+  let armTimer = null;
+  $("moveBtn").addEventListener("click", async () => {
+    const btn = $("moveBtn");
+    if (!btn.classList.contains("armed")) {
+      btn.classList.add("armed"); btn.textContent = `Bấm lần nữa để chuyển ${clips.length} clip vào thư mục con`;
+      armTimer = setTimeout(() => { btn.classList.remove("armed"); btn.textContent = "Chia luôn trong thư mục đã chọn"; }, 5000);
+      return;
+    }
+    clearTimeout(armTimer); btn.classList.remove("armed"); btn.textContent = "Chia luôn trong thư mục đã chọn";
+    try {
+      if ((await dirHandle.requestPermission({ mode: "readwrite" })) !== "granted") { setStatus($("zipStatus"), "Bạn chưa cho phép sửa thư mục này.", "err"); return; }
+      loading = true; refreshButtons();
+      const paths = folderPaths();
+      let n = 0;
+      for (const c of clips) {
+        let d = dirHandle;
+        for (const seg of paths.get(c.scene).split("/")) d = await d.getDirectoryHandle(seg, { create: true });
+        setStatus($("zipStatus"), `Đang chuyển ${++n}/${clips.length}: ${c.name}`);
+        setBar($("zipBar"), n / clips.length);
+        if (typeof c.handle.move === "function") {
+          await c.handle.move(d);
+        } else {
+          const dest = await d.getFileHandle(c.name, { create: true });
+          const w = await dest.createWritable();
+          await (await c.handle.getFile()).stream().pipeTo(w);
+          await dirHandle.removeEntry(c.name);
+          c.handle = dest;
+        }
+      }
+      const writeText = async (name, text) => { const h = await dirHandle.getFileHandle(name, { create: true }); const w = await h.createWritable(); await w.write("﻿" + text); await w.close(); };
+      await writeText("_DANH-SACH-SOURCE.txt", listText());
+      if (script) await writeText("_KICH-BAN.txt", scriptText());
+      setBar($("zipBar"), null);
+      setStatus($("zipStatus"), `Đã chia ${clips.length} clip vào các thư mục con trong “${dirHandle.name}”. Kéo cả thư mục lên Google Drive cho editor.`, "ok");
+    } catch (e) {
+      setBar($("zipBar"), null);
+      setStatus($("zipStatus"), "Chuyển file bị dừng giữa chừng. Các clip đã chuyển nằm trong thư mục con, clip còn lại vẫn ở chỗ cũ.", "err");
+    } finally { loading = false; refreshButtons(); }
+  });
+
+  let loading = false;
+  async function addFiles(list) {
+    const vids = [...list].filter(f => /^video\//.test(f.type) || /\.(mp4|mov|m4v)$/i.test(f.name));
+    const fresh = vids.filter(f => !clips.some(c => c.name === f.name && c.size === f.size));
+    if (!fresh.length) { setStatus($("loadStatus"), vids.length ? "Các clip này đã có trong danh sách." : "Không thấy file video MP4/MOV nào.", vids.length ? "" : "err"); return; }
+    loading = true; refreshButtons();
+    for (let i = 0; i < fresh.length; i++) {
+      const f = fresh[i];
+      setStatus($("loadStatus"), `Đang đọc clip ${i + 1}/${fresh.length}: ${f.name}`);
+      setBar($("loadBar"), i / fresh.length);
+      const t = await shotTime(f);
+      const fr = await grabFrame(f);
+      const c = {
+        id: "c" + Date.now().toString(36) + i, file: f, handle: handleOf.get(f) || null, name: f.name, size: f.size,
+        time: t || new Date(f.lastModified), timeFrom: t ? "file" : "sửa file",
+        dur: fr.dur, ok: fr.ok, landscape: !!fr.landscape, desc: "", scene: null,
+        thumbBlob: fr.blob || null, thumbUrl: fr.blob ? URL.createObjectURL(fr.blob) : ""
+      };
+      clips.push(c);
+    }
+    clips.sort((a, b) => a.time - b.time || a.name.localeCompare(b.name));
+    setBar($("loadBar"), null);
+    loading = false;
+    const noTime = clips.filter(c => c.timeFrom !== "file").length;
+    const noImg = clips.filter(c => !c.ok).length;
+    let msg = `${clips.length} clip · ${fmtMB(clips.reduce((s, c) => s + c.size, 0))}.`;
+    if (noTime) msg += ` ${noTime} clip không có giờ quay trong file, đang dùng giờ sửa file.`;
+    if (noImg) msg += ` ${noImg} clip trình duyệt không xem được hình (thường là MOV mã HEVC), vẫn chia theo giờ.`;
+    setStatus($("loadStatus"), msg, noTime || noImg ? "" : "ok");
+    if (!scenes.length) setStatus($("sortStatus"), "Bấm “Để AI xem hình và chia cảnh”, hoặc chia nhanh theo giờ quay.");
+    else { clips.forEach(c => { if (!c.scene) c.scene = scenes[scenes.length - 1].id; }); renderScenes(); }
+    renderClips();
+    refreshButtons();
+  }
+
+  function clipNo(c) { return clips.indexOf(c) + 1; }
+
+  function clipCard(c, withSelect) {
+    const el = document.createElement("div"); el.className = "clip";
+    const th = document.createElement("div"); th.className = "thumb";
+    if (c.thumbUrl) { const im = document.createElement("img"); im.src = c.thumbUrl; im.alt = c.name; th.appendChild(im); }
+    else { const no = document.createElement("div"); no.className = "no"; no.textContent = "Không xem được hình"; th.appendChild(no); }
+    const b = document.createElement("span"); b.className = "badge"; b.textContent = "#" + clipNo(c); th.appendChild(b);
+    if (fmtDur(c.dur)) { const d = document.createElement("span"); d.className = "dur"; d.textContent = fmtDur(c.dur); th.appendChild(d); }
+    el.appendChild(th);
+    const n = document.createElement("div"); n.className = "name"; n.textContent = c.name; n.title = c.name; el.appendChild(n);
+    const m = document.createElement("div"); m.className = "meta"; m.textContent = fmtDate(c.time) + " " + fmtTime(c.time) + " · " + fmtMB(c.size); el.appendChild(m);
+    if (c.desc) { const ds = document.createElement("div"); ds.className = "desc"; ds.textContent = c.desc; el.appendChild(ds); }
+    if (withSelect) {
+      const sel = document.createElement("select");
+      sel.setAttribute("aria-label", "Chuyển " + c.name + " sang cảnh");
+      scenes.forEach(s => { const o = document.createElement("option"); o.value = s.id; o.textContent = s.name; if (s.id === c.scene) o.selected = true; sel.appendChild(o); });
+      sel.addEventListener("change", () => { c.scene = sel.value; renderScenes(); });
+      el.appendChild(sel);
+    }
+    return el;
+  }
+
+  function renderClips() {
+    const g = $("clipGrid"); g.innerHTML = "";
+    if (scenes.length) return; // once sorted, clips show inside scenes
+    clips.forEach(c => g.appendChild(clipCard(c, false)));
+  }
+
+  // ---------- scenes & folder paths ----------
+  function sceneClips(s) { return clips.filter(c => c.scene === s.id); }
+  function orderedScenes() {
+    const withFirst = scenes.map(s => { const cs = sceneClips(s); return { s, first: cs.length ? cs[0].time : null }; });
+    withFirst.sort((a, b) => (a.first == null) - (b.first == null) || (a.first - b.first));
+    return withFirst.map(x => x.s);
+  }
+  function folderPaths() {
+    const days = [...new Set(clips.map(c => dayKey(c.time)))].sort();
+    const multiDay = days.length > 1;
+    const prefix = $("dayPrefix").value.trim() || "Ngày";
+    const out = new Map();
+    let n = 0;
+    orderedScenes().forEach(s => {
+      const cs = sceneClips(s);
+      if (!cs.length) return;
+      n++;
+      const dName = multiDay ? safe(prefix + " " + (days.indexOf(dayKey(cs[0].time)) + 1)) + "/" : "";
+      out.set(s.id, dName + pad(n) + " " + safe(s.name));
+    });
+    return out;
+  }
+
+  function renderScenes() {
+    const box = $("scenes"); box.innerHTML = "";
+    $("clipGrid").innerHTML = "";
+    $("sceneTools").hidden = !scenes.length;
+    const paths = folderPaths();
+    orderedScenes().forEach(s => {
+      const cs = sceneClips(s);
+      const card = document.createElement("div"); card.className = "scene";
+      const head = document.createElement("div"); head.className = "scene-head";
+      const inp = document.createElement("input"); inp.type = "text"; inp.value = s.name; inp.id = "sn-" + s.id;
+      inp.setAttribute("aria-label", "Tên cảnh");
+      inp.addEventListener("change", () => { s.name = inp.value.trim() || s.name; renderScenes(); });
+      head.appendChild(inp);
+      const chip = document.createElement("span"); chip.className = "chip"; chip.textContent = cs.length + " clip"; head.appendChild(chip);
+      if (cs.length) {
+        const meta = document.createElement("span"); meta.className = "path";
+        meta.textContent = fmtDate(cs[0].time) + " " + fmtTime(cs[0].time) + "–" + fmtTime(cs[cs.length - 1].time) + " · thư mục: " + (paths.get(s.id) || "");
+        head.appendChild(meta);
+      } else {
+        const del = document.createElement("button"); del.className = "ghost"; del.textContent = "Xoá cảnh trống";
+        del.addEventListener("click", () => { scenes = scenes.filter(x => x !== s); renderScenes(); });
+        head.appendChild(del);
+      }
+      card.appendChild(head);
+      if (s.note) { const p = document.createElement("div"); p.className = "muted small"; p.textContent = s.note; card.appendChild(p); }
+      const grid = document.createElement("div"); grid.className = "clips";
+      cs.forEach(c => grid.appendChild(clipCard(c, true)));
+      if (!cs.length) { const e = document.createElement("div"); e.className = "muted small"; e.textContent = "Chưa có clip. Chọn cảnh này ở ô dưới một clip để chuyển vào."; grid.appendChild(e); }
+      card.appendChild(grid);
+      box.appendChild(card);
+    });
+    renderPerScene();
+    refreshButtons();
+  }
+
+  $("addScene").addEventListener("click", () => { scenes.push({ id: "s" + (++sceneSeq), name: "Cảnh mới" }); renderScenes(); });
+  $("dayPrefix").addEventListener("change", () => { if (scenes.length) renderScenes(); });
+
+  function byTime() {
+    const gap = Math.max(1, parseInt($("gap").value, 10) || 30) * 60000;
+    scenes = []; let cur = null, last = null, n = 0;
+    clips.forEach(c => {
+      if (!cur || c.time - last > gap || dayKey(c.time) !== dayKey(last)) {
+        n++; cur = { id: "s" + (++sceneSeq), name: "Cảnh " + pad(n) + " - " + pad(c.time.getHours()) + "h" + pad(c.time.getMinutes()) };
+        scenes.push(cur);
+      }
+      c.scene = cur.id; last = c.time;
+    });
+  }
+  $("timeBtn").addEventListener("click", () => {
+    byTime(); script = null; $("scriptOut").hidden = true;
+    renderScenes();
+    setStatus($("sortStatus"), `Đã chia ${scenes.length} cảnh theo giờ quay. Đổi tên từng cảnh cho editor dễ hiểu.`, "ok");
+  });
+
+  // ---------- AI sorting ----------
+  async function buildSheets(list, perSheet) {
+    const sheets = [];
+    for (let s = 0; s < list.length; s += perSheet) {
+      const part = list.slice(s, s + perSheet);
+      const cols = 4, rows = Math.ceil(part.length / cols), W = 300, H = 400;
+      const c = document.createElement("canvas"); c.width = cols * W; c.height = rows * H;
+      const g = c.getContext("2d"); g.fillStyle = "#000"; g.fillRect(0, 0, c.width, c.height);
+      for (let i = 0; i < part.length; i++) {
+        const clip = part[i], x = (i % cols) * W, y = Math.floor(i / cols) * H;
+        if (clip.thumbBlob) { const bmp = await createImageBitmap(clip.thumbBlob); g.drawImage(bmp, x, y, W, H); bmp.close && bmp.close(); }
+        g.fillStyle = "rgba(0,0,0,.75)"; g.fillRect(x, y, 86, 44);
+        g.fillStyle = "#ffd54a"; g.font = "bold 32px sans-serif"; g.fillText("#" + clipNo(clip), x + 8, y + 34);
+        g.strokeStyle = "#000"; g.lineWidth = 4; g.strokeRect(x, y, W, H);
+      }
+      sheets.push(await new Promise(r => c.toBlob(r, "image/jpeg", 0.85)));
+    }
+    return sheets;
+  }
+
+  let aiCtl = null;
+  $("autoBtn").addEventListener("click", async () => {
+    if (!sampleFn) return;
+    const withImg = clips.filter(c => c.ok);
+    const perSheet = 12;
+    if (!imgLimits || !withImg.length) { setStatus($("sortStatus"), "AI không xem hình được ở đây. Đã chia theo giờ quay thay thế.", "err"); byTime(); renderScenes(); return; }
+    const maxSheets = imgLimits.maxCount || 1;
+    const usable = withImg.slice(0, maxSheets * perSheet);
+    const btn = $("autoBtn"); btn.disabled = true;
+    setStatus($("sortStatus"), "Đang ghép ảnh các clip…");
+    try {
+      const sheets = await buildSheets(usable, perSheet);
+      const lines = clips.map(c => `#${clipNo(c)} ${c.name} · ${fmtDate(c.time)} ${fmtTime(c.time)} · ${fmtDur(c.dur) || "?"}${c.ok ? "" : " · (không có hình)"}${c.landscape ? " · quay ngang" : ""}`).join("\n");
+      const prompt =
+`Bạn là trợ lý dựng video. Mình có ${clips.length} clip quay bằng điện thoại cho dự án "${$("project").value}". Ảnh gửi kèm là ảnh ghép: mỗi ô là một khung hình của một clip, số #N vàng ở góc trên trái là số clip.
+Danh sách clip theo thứ tự giờ quay (số · tên file · ngày giờ · thời lượng):
+${lines}
+
+Nhiệm vụ: chia clip thành các CẢNH theo địa điểm / hoạt động (ví dụ "Ăn sáng bánh canh", "Quán cà phê", "Dạo rừng lá phong", "Trên xe"), để editor mở thư mục là hiểu.
+Quy tắc:
+- Clip quay liền nhau ở cùng nơi, cùng hoạt động thì chung cảnh. Ưu tiên giữ đúng thứ tự thời gian; chỉ gộp clip cách xa về giờ khi rõ ràng cùng nơi.
+- Clip không có hình thì xếp theo giờ quay gần nhất.
+- Tên cảnh tiếng Việt có dấu, 2–5 chữ, không dùng ký tự / \\ : * ? " < > |. Không chắc tên món/quán thì ghi chung (vd "Quán ăn sáng") và thêm "(?)".
+- Mỗi clip một mô tả ngắn tối đa 12 chữ về nội dung hình.
+- Mỗi clip phải nằm trong đúng một cảnh.
+
+Chỉ trả về JSON đúng dạng:
+{"scenes":[{"name":"Ăn sáng bánh canh","clips":[1,2,3],"note":"gợi ý dùng cảnh này, 1 câu"}],"clips":[{"n":1,"desc":"cận rổ ớt, chanh trên bàn gỗ"}]}`;
+      setStatus($("sortStatus"), "AI đang xem hình và chia cảnh… (thường mất 20–60 giây)");
+      aiCtl = new AbortController();
+      const res = await sampleFn.json(prompt, { images: sheets, signal: aiCtl.signal });
+      if (!res || !Array.isArray(res.scenes)) throw { code: "invalid_json" };
+      scenes = [];
+      const assigned = new Set();
+      res.scenes.forEach(sc => {
+        const s = { id: "s" + (++sceneSeq), name: safe(String(sc.name || "Cảnh")), note: sc.note ? String(sc.note) : "" };
+        (sc.clips || []).forEach(n => { const c = clips[Number(n) - 1]; if (c && !assigned.has(c)) { c.scene = s.id; assigned.add(c); } });
+        scenes.push(s);
+      });
+      (res.clips || []).forEach(x => { const c = clips[Number(x.n) - 1]; if (c && x.desc) c.desc = String(x.desc); });
+      const left = clips.filter(c => !assigned.has(c));
+      if (left.length) {
+        const s = { id: "s" + (++sceneSeq), name: "Chưa phân loại", note: "AI chưa xếp các clip này, bạn chuyển giúp." };
+        scenes.push(s); left.forEach(c => c.scene = s.id);
+      }
+      scenes = scenes.filter(s => sceneClips(s).length);
+      script = null; $("scriptOut").hidden = true;
+      renderScenes();
+      let msg = `AI đã chia ${scenes.length} cảnh. Kiểm tra lại tên cảnh và chỗ có dấu (?).`;
+      if (withImg.length > usable.length) msg += ` ${withImg.length - usable.length} clip cuối vượt giới hạn ảnh, nằm ở “Chưa phân loại”.`;
+      setStatus($("sortStatus"), msg, "ok");
+    } catch (e) {
+      const code = e && e.code;
+      const copy = {
+        not_granted: "Bạn chưa cho phép trang dùng Claude. Đã chia theo giờ quay thay thế.",
+        bad_key: "API key không đúng hoặc đã bị khoá. Kiểm tra lại key. Tạm chia theo giờ quay.",
+        no_credit: "Tài khoản API hết tiền. Nạp thêm ở console.anthropic.com. Tạm chia theo giờ quay.",
+        refused: "AI từ chối xử lý bộ ảnh này. Tạm chia theo giờ quay.",
+        rate_limited: "Đang gọi AI quá nhiều, thử lại sau ít phút. Tạm chia theo giờ quay.",
+        invalid_json: "AI trả kết quả không đọc được. Bấm lại để thử lần nữa.",
+        cancelled: "Đã dừng."
+      };
+      if (code !== "invalid_json" && code !== "cancelled") { byTime(); renderScenes(); }
+      setStatus($("sortStatus"), copy[code] || "Không gọi được AI lúc này. Đã chia theo giờ quay thay thế.", "err");
+    } finally { btn.disabled = false; refreshButtons(); }
+  });
+
+  // ---------- script ----------
+  $("scriptBtn").addEventListener("click", async () => {
+    if (!sampleFn) return;
+    const paths = folderPaths();
+    const sceneText = orderedScenes().filter(s => sceneClips(s).length).map(s => {
+      const cs = sceneClips(s);
+      return `CẢNH "${s.name}" (${paths.get(s.id)})${s.note ? " — " + s.note : ""}\n` + cs.map(c => `  ${c.name.replace(/\.[^.]+$/, "")} · ${fmtTime(c.time)} · ${fmtDur(c.dur) || "?"}${c.landscape ? " · quay ngang" : ""}${c.desc ? " · " + c.desc : ""}`).join("\n");
+    }).join("\n\n");
+    const prompt =
+`Viết kịch bản video dọc 9:16 dài ${$("len").value} cho dự án "${$("project").value}".
+Phong cách: ${$("style").value}.
+Chỉ dùng các clip có sẵn dưới đây (tên clip không có đuôi), theo đúng nội dung mô tả, không bịa địa điểm, giá tiền hay tên quán không có trong mô tả.
+
+${sceneText}
+
+Yêu cầu:
+- 3 phương án hook cho 3 giây đầu, mỗi phương án nêu clip dùng.
+- Bảng theo giây: mỗi dòng 2–4 giây, ghi clip dùng (tên clip), lời thoại voice-over tiếng Việt, chữ màn hình ngắn (có thể để trống).
+- Caption 1–2 câu và 5–8 hashtag.
+- 3–5 ghi chú dựng ngắn cho editor (nhịp cắt, clip quay ngang, âm thanh).
+
+Chỉ trả về JSON đúng dạng:
+{"hooks":[{"line":"…","onscreen":"…","clip":"IMG_4685"}],"rows":[{"time":"0–3","clip":"IMG_4685","vo":"…","onscreen":"…"}],"caption":"…","hashtags":["#dalat"],"notes":["…"]}`;
+    const btn = $("scriptBtn"); btn.disabled = true;
+    setStatus($("scriptStatus"), "Đang viết kịch bản… (thường mất 20–60 giây)");
+    try {
+      const res = await sampleFn.json(prompt, { cache: false });
+      if (!res || !Array.isArray(res.rows)) throw { code: "invalid_json" };
+      script = res; renderScript();
+      setStatus($("scriptStatus"), "Đã viết xong. Bấm lại để có bản khác.", "ok");
+    } catch (e) {
+      const code = e && e.code;
+      setStatus($("scriptStatus"), code === "bad_key" ? "API key không đúng hoặc đã bị khoá." : code === "no_credit" ? "Tài khoản API hết tiền, nạp thêm ở console.anthropic.com." : code === "not_granted" ? "Bạn chưa cho phép trang dùng Claude." : code === "rate_limited" ? "Đang gọi AI quá nhiều, thử lại sau ít phút." : code === "invalid_json" ? "AI trả kết quả không đọc được. Bấm lại để thử lần nữa." : "Không viết được lúc này, thử lại sau.", "err");
+    } finally { btn.disabled = false; refreshButtons(); }
+  });
+
+  function renderScript() {
+    $("scriptOut").hidden = false;
+    const hk = $("hooks"); hk.innerHTML = "";
+    (script.hooks || []).forEach((h, i) => {
+      const d = document.createElement("div"); d.className = "hook";
+      const b = document.createElement("b"); b.textContent = "Hook " + String.fromCharCode(65 + i) + ": ";
+      d.appendChild(b); d.append(String(h.line || ""));
+      const m = document.createElement("div"); m.className = "muted small";
+      m.textContent = "Chữ: " + (h.onscreen || "—") + " · Clip: " + (h.clip || "—");
+      d.appendChild(m); hk.appendChild(d);
+    });
+    const tb = $("rows"); tb.innerHTML = "";
+    (script.rows || []).forEach(r => {
+      const tr = document.createElement("tr");
+      [["t", r.time], ["c", r.clip], ["", r.vo], ["", r.onscreen]].forEach(([cls, v]) => {
+        const td = document.createElement("td"); if (cls) td.className = cls; td.textContent = String(v || ""); tr.appendChild(td);
+      });
+      tb.appendChild(tr);
+    });
+    const ex = $("extra"); ex.innerHTML = "";
+    if (script.caption || script.hashtags) {
+      const p = document.createElement("p"); p.style.margin = "0";
+      const b = document.createElement("b"); b.textContent = "Caption: "; p.appendChild(b);
+      p.append(String(script.caption || "") + " " + (script.hashtags || []).join(" "));
+      ex.appendChild(p);
+    }
+    if ((script.notes || []).length) {
+      const ul = document.createElement("ul"); ul.style.margin = "8px 0 0"; ul.style.paddingLeft = "18px";
+      script.notes.forEach(n => { const li = document.createElement("li"); li.textContent = String(n); ul.appendChild(li); });
+      ex.appendChild(ul);
+    }
+  }
+
+  function scriptText() {
+    if (!script) return "";
+    let t = `KỊCH BẢN: ${$("project").value} (${$("len").value})\n\nHOOK\n`;
+    (script.hooks || []).forEach((h, i) => t += `${String.fromCharCode(65 + i)}. ${h.line}  [chữ: ${h.onscreen || "-"} | clip: ${h.clip || "-"}]\n`);
+    t += "\nTHEO GIÂY\n";
+    (script.rows || []).forEach(r => t += `${r.time}s | ${r.clip} | ${r.vo}${r.onscreen ? " | chữ: " + r.onscreen : ""}\n`);
+    if (script.caption) t += `\nCAPTION\n${script.caption}\n${(script.hashtags || []).join(" ")}\n`;
+    if ((script.notes || []).length) t += "\nGHI CHÚ DỰNG\n" + script.notes.map(n => "- " + n).join("\n") + "\n";
+    return t;
+  }
+
+  async function copyText(text, statusEl) {
+    try { await navigator.clipboard.writeText(text); setStatus(statusEl, "Đã copy.", "ok"); }
+    catch (e) {
+      const out = $("listOut"); out.hidden = false; out.textContent = text;
+      const r = document.createRange(); r.selectNodeContents(out); const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+      setStatus(statusEl, "Không copy tự động được, mình đã bôi đen sẵn đoạn chữ bên dưới, bấm Ctrl+C.", "");
+    }
+  }
+  $("copyScript").addEventListener("click", () => copyText(scriptText(), $("scriptStatus")));
+
+  // ---------- list for editor ----------
+  function listText() {
+    const paths = folderPaths();
+    let t = `SOURCE: ${$("project").value} · ${clips.length} clip\n\n`;
+    orderedScenes().forEach(s => {
+      const cs = sceneClips(s); if (!cs.length) return;
+      t += `=== ${paths.get(s.id)}  (${fmtDate(cs[0].time)} ${fmtTime(cs[0].time)}–${fmtTime(cs[cs.length - 1].time)}, ${cs.length} clip) ===\n`;
+      if (s.note) t += `   ${s.note}\n`;
+      cs.forEach(c => t += `- ${c.name}  ${fmtTime(c.time)}  (${[fmtDur(c.dur), fmtMB(c.size), c.landscape ? "quay ngang" : ""].filter(Boolean).join(", ")})${c.desc ? "  " + c.desc : ""}\n`);
+      t += "\n";
+    });
+    return t;
+  }
+  $("copyList").addEventListener("click", () => copyText(listText(), $("zipStatus")));
+
+  // ---------- ZIP (store, no compression) ----------
+  const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+  function crcUpdate(crc, buf) { let c = crc ^ 0xFFFFFFFF; for (let i = 0; i < buf.length; i++) c = CRC_T[(c ^ buf[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+  async function crcBlob(blob, onBytes) {
+    const reader = blob.stream().getReader(); let crc = 0;
+    for (;;) { const { done, value } = await reader.read(); if (done) break; crc = crcUpdate(crc, value); onBytes(value.length); }
+    return crc;
+  }
+  function dosTime(d) {
+    return { time: (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1), date: ((Math.max(1980, d.getFullYear()) - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate() };
+  }
+  async function buildZip(entries, onProgress) {
+    // entries: [{path, blob, date}]
+    const enc = new TextEncoder();
+    const parts = [], central = [];
+    let offset = 0, doneBytes = 0;
+    const total = entries.reduce((s, e) => s + e.blob.size, 0);
+    for (const e of entries) {
+      const name = enc.encode(e.path);
+      const crc = await crcBlob(e.blob, n => { doneBytes += n; onProgress(doneBytes / total); });
+      const { time, date } = dosTime(e.date || new Date());
+      const lh = new DataView(new ArrayBuffer(30));
+      lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true); lh.setUint16(8, 0, true);
+      lh.setUint16(10, time, true); lh.setUint16(12, date, true); lh.setUint32(14, crc, true);
+      lh.setUint32(18, e.blob.size, true); lh.setUint32(22, e.blob.size, true); lh.setUint16(26, name.length, true); lh.setUint16(28, 0, true);
+      parts.push(lh.buffer, name, e.blob);
+      const ch = new DataView(new ArrayBuffer(46));
+      ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0x0800, true); ch.setUint16(10, 0, true);
+      ch.setUint16(12, time, true); ch.setUint16(14, date, true); ch.setUint32(16, crc, true);
+      ch.setUint32(20, e.blob.size, true); ch.setUint32(24, e.blob.size, true); ch.setUint16(28, name.length, true);
+      ch.setUint16(30, 0, true); ch.setUint16(32, 0, true); ch.setUint16(34, 0, true); ch.setUint16(36, 0, true); ch.setUint32(38, 0, true); ch.setUint32(42, offset, true);
+      central.push(ch.buffer, name);
+      offset += 30 + name.length + e.blob.size;
+    }
+    const cdSize = central.reduce((s, p) => s + (p.byteLength || p.length), 0);
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true); end.setUint16(8, entries.length, true); end.setUint16(10, entries.length, true);
+    end.setUint32(12, cdSize, true); end.setUint32(16, offset, true);
+    return new Blob([...parts, ...central, end.buffer], { type: "application/zip" });
+  }
+  const ZIP_MAX = 3.9 * 1024 * 1024 * 1024;
+
+  async function saveZip(sceneIds, filename) {
+    if (!downloads) return;
+    const proj = safe($("project").value);
+    const paths = folderPaths();
+    const entries = [];
+    clips.forEach(c => { if (sceneIds.includes(c.scene) && paths.get(c.scene)) entries.push({ path: proj + "/" + paths.get(c.scene) + "/" + c.name, blob: c.file, date: c.time }); });
+    entries.push({ path: proj + "/_DANH-SACH-SOURCE.txt", blob: new Blob(["﻿" + listText()]), date: new Date() });
+    if (script) entries.push({ path: proj + "/_KICH-BAN.txt", blob: new Blob(["﻿" + scriptText()]), date: new Date() });
+    const total = entries.reduce((s, e) => s + e.blob.size, 0);
+    if (total > ZIP_MAX) { setStatus($("zipStatus"), "Tổng dung lượng quá 3,9 GB nên không gói chung được. Dùng các nút tải theo từng cảnh bên dưới.", "err"); return; }
+    const btns = document.querySelectorAll("#s4 ~ * button, #zipBtn, #perScene button"); btns.forEach(b => b.disabled = true);
+    try {
+      setStatus($("zipStatus"), "Đang gói file… (clip giữ nguyên, không nén lại)");
+      const zip = await buildZip(entries, f => setBar($("zipBar"), f));
+      setBar($("zipBar"), null);
+      setStatus($("zipStatus"), "Đang chờ bạn xác nhận lưu file…");
+      await downloads.save({ filename, data: zip });
+      setStatus($("zipStatus"), `Đã lưu ${filename}. Giải nén rồi kéo cả thư mục “${proj}” lên Google Drive cho editor.`, "ok");
+    } catch (e) {
+      setBar($("zipBar"), null);
+      const code = e && e.code;
+      setStatus($("zipStatus"), code === "declined" ? "Bạn đã huỷ lưu file." : code === "too_large" ? "File quá lớn cho nơi lưu này. Tải theo từng cảnh bên dưới." : "Không lưu được file lúc này.", code === "declined" ? "" : "err");
+    } finally { refreshButtons(); }
+  }
+  $("zipBtn").addEventListener("click", () => saveZip(scenes.map(s => s.id), safe($("project").value) + " - da chia.zip"));
+
+  function renderPerScene() {
+    const box = $("perScene"); box.innerHTML = "";
+    if (!downloads || !scenes.length) return;
+    const total = clips.reduce((s, c) => s + c.size, 0);
+    if (total <= ZIP_MAX) return;
+    const paths = folderPaths();
+    orderedScenes().forEach(s => {
+      if (!sceneClips(s).length) return;
+      const b = document.createElement("button");
+      b.textContent = "Tải: " + paths.get(s.id);
+      b.addEventListener("click", () => saveZip([s.id], safe($("project").value) + " - " + safe(s.name) + ".zip"));
+      box.appendChild(b);
+    });
+  }
+
+  // ---------- buttons ----------
+  function refreshButtons() {
+    const has = clips.length > 0 && !loading;
+    const sorted = scenes.length > 0 && clips.every(c => c.scene);
+    $("timeBtn").disabled = !has;
+    $("autoBtn").disabled = !has || !sampleFn;
+    $("autoBtn").title = sampleFn ? "" : "Nhập API key ở trên để bật AI";
+    $("scriptBtn").disabled = !sorted || !sampleFn || loading;
+    $("zipBtn").disabled = !sorted || !downloads || loading;
+    $("zipBtn").hidden = !downloads && sorted;
+    $("copyList").disabled = !sorted;
+    if (sorted && /^(Chia cảnh|Viết kịch bản cần)/.test($("scriptStatus").textContent)) setStatus($("scriptStatus"), sampleFn ? "Sẵn sàng. Chọn độ dài rồi bấm “Viết kịch bản”." : "Viết kịch bản cần API key ở bước 2.");
+    $("moveBtn").hidden = !(dirHandle && sorted && clips.every(c => c.handle));
+    $("moveBtn").disabled = loading;
+  }
+})();
+</script>
+</body>
+</html>
