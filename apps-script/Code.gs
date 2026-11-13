@@ -5,7 +5,9 @@
  */
 
 function doGet() {
-  return HtmlService.createHtmlOutputFromFile('Index')
+  var page;
+  try { page = HtmlService.createHtmlOutputFromFile('Index'); } catch (e) { page = HtmlService.createHtmlOutputFromFile('index'); }
+  return page
     .setTitle('Chia Source Clip')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
