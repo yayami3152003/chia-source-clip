@@ -181,7 +181,7 @@
   <section aria-labelledby="s2">
     <h2 id="s2"><span class="step">2</span>Chia cảnh</h2>
     <div class="row">
-      <button class="primary" id="autoBtn" disabled>Để AI xem hình, chia cảnh và đưa lên Google Drive</button>
+      <button class="primary" id="autoBtn" disabled>Để AI xem hình và chia cảnh</button>
       <button id="resortBtn" disabled>Chia lại tự động</button>
       <button id="timeBtn" disabled>Chỉ chia theo giờ quay</button>
       <label class="field">Cách nhau quá (phút) là cảnh mới
@@ -190,16 +190,6 @@
     </div>
     <div class="status" id="sortStatus" aria-live="polite">Chọn clip ở bước 1 là trang tự xem hình và chia cảnh. AI chạy ngay trên máy bạn, miễn phí, không cần key; lần đầu tải bộ nhận diện hình khoảng 90 MB (chỉ 1 lần).</div>
     <div class="bar" id="aiBar" hidden><i></i></div>
-    <details id="driveSetup">
-      <summary class="small">Cài đặt Google Drive (làm 1 lần)</summary>
-      <div class="row" style="margin-top:8px">
-        <label class="field grow">Google Client ID
-          <input type="text" id="gClientId" placeholder="xxxxxxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false">
-        </label>
-        <button id="gSave">Lưu</button>
-      </div>
-      <div class="muted small">Mã này không phải mật khẩu, chỉ để Google biết trang nào xin quyền. Trang chỉ được tạo thư mục mới và tải clip lên Drive của bạn, không đọc được file khác.</div>
-    </details>
     <div class="status" id="driveStatus" aria-live="polite"></div>
     <div class="bar" id="driveBar" hidden><i></i></div>
     <div class="scenes" id="scenes"></div>
@@ -379,22 +369,12 @@
 
   // ---------- Google Drive ----------
   const GOOGLE_CLIENT_ID = "";
+  // Link công cụ Apps Script sau khi Deploy (dạng https://script.google.com/macros/s/…/exec). Để trống = chưa cài.
+  const TOOL_URL = "";
+  const GUIDE_URL = "https://github.com/yayami3152003/chia-source-clip/blob/main/apps-script/HUONG-DAN.md";
   const G_STORE = "chia-source-google-client-id";
   const validId = v => /^[\w-]+\.apps\.googleusercontent\.com$/.test(String(v || "").trim());
-  function clientId() { let v = GOOGLE_CLIENT_ID; try { v = v || localStorage.getItem(G_STORE) || ""; } catch (e) {} v = v.trim(); return validId(v) ? v : ""; }
-  $("gClientId").value = clientId();
-  $("driveSetup").open = !clientId();
-  $("gSave").addEventListener("click", () => {
-    const v = $("gClientId").value.trim();
-    if (!validId(v)) {
-      if (/drive\.google\.com/.test(v)) { $("driveLink").value = v; $("gClientId").value = ""; setStatus($("driveStatus"), "Đó là link thư mục Drive, mình đã chuyển lên ô “Dán link thư mục” ở bước 1. Ô này cần Google Client ID, dạng …apps.googleusercontent.com.", "err"); }
-      else setStatus($("driveStatus"), "Client ID chưa đúng. Mã đúng có đuôi .apps.googleusercontent.com.", "err");
-      return;
-    }
-    try { localStorage.setItem(G_STORE, v); } catch (e) {}
-    tokenClient = null; $("driveSetup").open = !clientId();
-    setStatus($("driveStatus"), clientId() ? "Đã lưu. Bấm nút ở trên để chia và đưa lên Drive." : "Chưa có Client ID.", clientId() ? "ok" : "");
-  });
+  function clientId() { return validId(GOOGLE_CLIENT_ID) ? GOOGLE_CLIENT_ID.trim() : ""; }
   let gisReady = null, tokenClient = null, pendingToken = null;
   function loadGis() {
     if (!gisReady) gisReady = new Promise((res, rej) => {
@@ -403,7 +383,7 @@
     });
     return gisReady;
   }
-  loadGis().catch(() => {});
+  if (clientId()) loadGis().catch(() => {});
   function requestToken() {
     // phải gọi ngay trong lúc bấm nút để cửa sổ đăng nhập Google không bị chặn
     return new Promise((res, rej) => {
@@ -545,8 +525,8 @@
     const folderId = folderIdFrom($("driveLink").value);
     if (!folderId) { setStatus(st, "Link chưa đúng. Dán link thư mục dạng https://drive.google.com/drive/folders/…", "err"); return; }
     if (!clientId()) {
-      $("driveSetup").open = true; $("driveSetup").scrollIntoView({ behavior: "smooth", block: "center" });
-      setStatus(st, "Cần cài Google Drive 1 lần trước: điền Google Client ID ở mục “Cài đặt Google Drive” (bước 2), bấm Lưu, rồi bấm lại nút này.", "err");
+      if (TOOL_URL) { window.open(TOOL_URL + "?link=" + encodeURIComponent($("driveLink").value.trim()), "_blank", "noopener"); setStatus(st, "Đã mở công cụ Chia trên Drive ở tab mới, công cụ tự chạy với link này.", "ok"); }
+      else { st.className = "status err"; st.textContent = "Công cụ chia ngay trên Drive chưa được cài. Cài 1 lần theo "; const a = document.createElement("a"); a.href = GUIDE_URL; a.target = "_blank"; a.rel = "noopener"; a.textContent = "hướng dẫn này (3 phút)"; st.appendChild(a); st.append(", rồi gửi link công cụ để gắn vào đây."); }
       return;
     }
     const tokenP = requestToken(); tokenP.catch(() => {});
@@ -926,11 +906,7 @@
     btn.disabled = true;
     try {
       if (!scenes.length || clips.some(c => !c.scene)) await autoSort();
-      if (!clientId()) {
-        $("driveSetup").open = true;
-        setStatus($("driveStatus"), "Đã chia xong. Muốn tự đưa lên Google Drive thì điền Google Client ID ở mục “Cài đặt Google Drive” ngay dưới (làm 1 lần).", "err");
-        return;
-      }
+      if (!clientId()) { setStatus($("sortStatus"), `Đã chia xong ${scenes.length} cảnh. Ở bước 4 bấm “Chia luôn trong thư mục đã chọn” hoặc “Tải .zip”.`, "ok"); return; }
       setStatus($("driveStatus"), "Đang chờ bạn đăng nhập Google trong cửa sổ mới…");
       const token = await tokenP;
       await uploadToDrive(token);

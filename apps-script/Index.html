@@ -304,6 +304,14 @@
   }
   $("copy").addEventListener("click", () => show(listText()));
 
+  // mở kèm ?link=… (từ trang GitHub) thì tự điền link và tự chia
+  try {
+    google.script.url.getLocation(loc => {
+      const l = loc && loc.parameter && loc.parameter.link;
+      if (l) { $("link").value = l; $("go").click(); }
+    });
+  } catch (e) {}
+
   // ---------- kịch bản nháp theo mẫu ----------
   const VO = {
     "Ăn uống": "Mở màn bằng một bữa ăn nóng hổi.", "Đồ ăn vặt": "Không thể thiếu món ăn vặt nóng giòn.",
