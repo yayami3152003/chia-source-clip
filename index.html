@@ -335,15 +335,19 @@
   function sortByAI() {
     const gap = Math.max(1, parseInt($("gap").value, 10) || 30) * 60000;
     const groups = []; let cur = null, last = null;
-    clips.forEach(c => {
+    const famOf = c => { const bp = bestPlace(c); return bp && !bp.personish && bp.score >= 0.5 ? LABELS[bp.k].fam : null; };
+    const tb = (a, b) => b.time - a.time > gap || dayKey(a.time) !== dayKey(b.time);
+    clips.forEach((c, i) => {
       const bp = bestPlace(c);
-      const strong = bp && !bp.personish && bp.score >= 0.5;
-      const timeBreak = !cur || c.time - last > gap || dayKey(c.time) !== dayKey(last);
-      const visualBreak = cur && strong && cur.fam && LABELS[bp.k].fam !== cur.fam;
+      const strong = !!famOf(c);
+      const timeBreak = !cur || tb(last, c);
+      const next = clips[i + 1];
+      const confirmed = !next || tb(c, next) || famOf(next) === famOf(c);
+      const visualBreak = cur && strong && cur.fam && LABELS[bp.k].fam !== cur.fam && confirmed;
       if (timeBreak || visualBreak) { cur = { clips: [], fam: null }; groups.push(cur); }
       cur.clips.push(c);
       if (strong && !cur.fam) cur.fam = LABELS[bp.k].fam;
-      last = c.time;
+      last = c;
     });
     const used = {};
     scenes = groups.map(g => {

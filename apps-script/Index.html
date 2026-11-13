@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<base target="_top">
+<title>Chia Source Clip</title>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* Một cột: dán link → tiến trình → kết quả theo thư mục */
+  :root {
+    --bg: #f5f3ef; --surface: #ffffff; --surface-2: #efebe4; --border: #e0d9cf;
+    --text: #23201c; --muted: #736b60; --accent: #8a4b26; --accent-soft: #f3e6dc; --on-accent: #ffffff;
+    --ok: #2f7d4b; --danger: #c0392b;
+    --font: "Be Vietnam Pro", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161411; --surface: #1f1c18; --surface-2: #2a2620; --border: #3a342c;
+      --text: #ece6dd; --muted: #a69c8e; --accent: #e0a37a; --accent-soft: #3a2a1f; --on-accent: #1a120c;
+      --ok: #6fcf91; --danger: #ff8a7a; color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; line-height: 1.5; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 28px 16px 64px; display: flex; flex-direction: column; gap: 18px; }
+  h1 { margin: 0; font-size: 24px; }
+  .lead { color: var(--muted); margin: 6px 0 0; max-width: 65ch; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  input[type=text] { flex: 1 1 320px; min-width: 0; font: inherit; font-size: 14px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); }
+  button { font: inherit; font-size: 14px; font-weight: 600; border: 1px solid var(--border); background: var(--surface); color: var(--text); padding: 10px 16px; border-radius: 10px; cursor: pointer; white-space: nowrap; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .status { color: var(--muted); font-size: 13px; }
+  .status.ok { color: var(--ok); } .status.err { color: var(--danger); }
+  .status a { color: var(--accent); font-weight: 600; }
+  .bar { height: 6px; background: var(--surface-2); border-radius: 99px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  .scene { border: 1px solid var(--border); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .scene-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .scene-head input { flex: 1 1 200px; font-weight: 600; padding: 8px 10px; }
+  .chip { font-size: 11px; background: var(--accent-soft); color: var(--accent); padding: 2px 8px; border-radius: 99px; font-weight: 600; }
+  .path { font-size: 12px; color: var(--muted); }
+  .clips { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+  .clip { min-width: 0; }
+  .thumb { aspect-ratio: 3 / 4; max-width: 100%; border-radius: 8px; overflow: hidden; background: var(--surface-2); display: grid; place-items: center; font-size: 10px; color: var(--muted); }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .clip .name { font-size: 11px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 3px; }
+  .clip .meta { font-size: 10px; color: var(--muted); }
+  pre { white-space: pre-wrap; font-family: inherit; font-size: 13px; background: var(--surface-2); padding: 12px; border-radius: 10px; margin: 0; max-height: 300px; overflow: auto; }
+  .muted { color: var(--muted); } .small { font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Chia Source Clip</h1>
+    <p class="lead">Dán link thư mục Google Drive chứa clip rồi bấm Chia. Trang tự xem hình từng clip, chia theo Ngày › Cảnh và chuyển clip vào thư mục con ngay trên Drive. Miễn phí, AI chạy trên máy bạn.</p>
+  </header>
+
+  <section class="card">
+    <div class="row">
+      <input type="text" id="link" placeholder="https://drive.google.com/drive/folders/..." spellcheck="false" autocomplete="off" aria-label="Link thư mục Google Drive">
+      <button class="primary" id="go">Chia</button>
+    </div>
+    <div class="status" id="status" aria-live="polite">Tài khoản đang dùng cần có quyền Sửa thư mục. Lần đầu tải bộ nhận diện hình khoảng 90 MB (chỉ 1 lần).</div>
+    <div class="bar" id="bar" hidden><i></i></div>
+    <div class="row" id="tools" hidden>
+      <button id="undo">Hoàn tác: trả clip về như cũ</button>
+      <button id="copy">Copy danh sách cho editor</button>
+      <button id="scriptBtn">Tạo kịch bản nháp</button>
+    </div>
+  </section>
+
+  <div id="scenes" style="display:flex;flex-direction:column;gap:12px"></div>
+  <section class="card" id="outBox" hidden><pre id="out"></pre></section>
+</div>
+
+<script>
+(function () {
+  const $ = id => document.getElementById(id);
+  const run = (fn, ...a) => new Promise((res, rej) => google.script.run.withSuccessHandler(res).withFailureHandler(rej)[fn](...a));
+  const pad = n => String(n).padStart(2, "0");
+  const fmtTime = d => pad(d.getHours()) + ":" + pad(d.getMinutes());
+  const fmtDate = d => pad(d.getDate()) + "/" + pad(d.getMonth() + 1);
+  const fmtDur = s => isFinite(s) && s > 0 ? Math.floor(s / 60) + ":" + pad(Math.round(s % 60)) : "";
+  const fmtMB = b => (b / 1048576).toFixed(1) + " MB";
+  const dayKey = d => d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+  const safe = s => (s || "").replace(/[\\/:*?"<>|\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim().replace(/\.+$/, "") || "Chưa đặt tên";
+  function setStatus(t, k) { const el = $("status"); el.textContent = t; el.className = "status" + (k ? " " + k : ""); return el; }
+  function setBar(f) { $("bar").hidden = f == null; if (f != null) $("bar").firstElementChild.style.width = Math.round(f * 100) + "%"; }
+
+  let clips = [], scenes = [], job = null, project = "";
+
+  // ---------- AI xem hình trên máy ----------
+  const LABELS = [
+    { vi: "Ăn uống", en: "a bowl of food or dishes on a dining table", fam: "food" },
+    { vi: "Đồ ăn vặt", en: "street food snacks or grilled food", fam: "food" },
+    { vi: "Quán cà phê", en: "a coffee shop, drinks or a cafe menu board", fam: "cafe" },
+    { vi: "Rừng cây, lá", en: "a forest with trees and fallen leaves", fam: "nature" },
+    { vi: "Vườn hoa", en: "a flower garden", fam: "nature" },
+    { vi: "Đồi núi", en: "mountains and hills landscape", fam: "nature" },
+    { vi: "Trên xe", en: "the inside of a car", fam: "car" },
+    { vi: "Phòng nghỉ", en: "a hotel room or a window view from a room", fam: "room" },
+    { vi: "Dạo phố", en: "a street with shops and buildings", fam: "street" },
+    { vi: "Chợ", en: "a busy market", fam: "street" },
+    { vi: "Biển", en: "a beach and the sea", fam: "water" },
+    { vi: "Hồ, sông", en: "a lake or a river", fam: "water" },
+    { vi: "Thú cưng", en: "a pet dog or cat", fam: "pet" },
+    { vi: "Makeup, mỹ phẩm", en: "makeup products, lipstick and cosmetics on a table", fam: "makeup" },
+    { vi: "Buổi tối", en: "a city at night with lights", fam: "night" },
+    { vi: "", en: "a selfie of a person", fam: "person" },
+    { vi: "", en: "a person posing for a photo", fam: "person" }
+  ];
+  let clfP = null;
+  function getClassifier() {
+    if (!clfP) {
+      clfP = (async () => {
+        const { pipeline } = await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.1");
+        const seen = {};
+        return pipeline("zero-shot-image-classification", "Xenova/clip-vit-base-patch32", {
+          dtype: "q8",
+          progress_callback: p => {
+            if (p.status === "progress" && p.total) {
+              seen[p.file] = [p.loaded, p.total];
+              const v = Object.values(seen), d = v.reduce((s, x) => s + x[0], 0), t = v.reduce((s, x) => s + x[1], 0);
+              setStatus(`Đang tải bộ nhận diện hình (chỉ lần đầu): ${Math.round(d / 1048576)}/${Math.round(t / 1048576)} MB`); setBar(d / t);
+            }
+          }
+        });
+      })();
+      clfP.catch(() => { clfP = null; });
+    }
+    return clfP;
+  }
+  async function classify() {
+    let clf = null;
+    try { clf = await getClassifier(); } catch (e) { return false; }
+    for (let i = 0; i < clips.length; i++) {
+      const c = clips[i];
+      setStatus(`AI đang xem hình clip ${i + 1}/${clips.length}…`); setBar(i / clips.length);
+      if (!c.thumb) continue;
+      try {
+        const out = await clf(c.thumb, LABELS.map(l => l.en), { hypothesis_template: "a photo of {}" });
+        c.scores = LABELS.map(l => (out.find(o => o.label === l.en) || { score: 0 }).score);
+      } catch (e) {}
+    }
+    setBar(null);
+    return true;
+  }
+  function bestPlace(c) {
+    if (!c.scores) return null;
+    let k = -1, s = -1;
+    LABELS.forEach((l, i) => { if (l.fam !== "person" && c.scores[i] > s) { s = c.scores[i]; k = i; } });
+    const person = LABELS.reduce((a, l, i) => a + (l.fam === "person" ? c.scores[i] : 0), 0);
+    return { k, score: s, personish: person > s };
+  }
+  function sortClips() {
+    const hasTime = clips.some(c => c.timeFromFile);
+    const gap = 30 * 60000;
+    const groups = []; let cur = null, last = null;
+    const famOf = c => { const bp = bestPlace(c); return bp && !bp.personish && bp.score >= 0.5 ? LABELS[bp.k].fam : null; };
+    const tb = (a, b) => hasTime && (b.time - a.time > gap || dayKey(a.time) !== dayKey(b.time));
+    clips.forEach((c, i) => {
+      const bp = bestPlace(c);
+      const strong = !!famOf(c);
+      const timeBreak = !cur || tb(last, c);
+      // chỉ tách theo hình khi clip kế tiếp cũng xác nhận cảnh mới (hoặc hết khối thời gian), tránh 1 khung hình lẫn vào làm vỡ cảnh
+      const next = clips[i + 1];
+      const confirmed = !next || tb(c, next) || famOf(next) === famOf(c);
+      const visualBreak = cur && strong && cur.fam && LABELS[bp.k].fam !== cur.fam && confirmed;
+      if (timeBreak || visualBreak) { cur = { clips: [], fam: null }; groups.push(cur); }
+      cur.clips.push(c);
+      if (strong && (!cur.fam || visualBreak)) cur.fam = LABELS[bp.k].fam;
+      last = c;
+    });
+    const used = {};
+    const days = hasTime ? [...new Set(clips.map(c => dayKey(c.time)))].sort() : [];
+    scenes = groups.map((g, gi) => {
+      const sum = LABELS.map((l, k) => l.fam === "person" ? -1 : g.clips.reduce((s, c) => s + (c.scores ? c.scores[k] : 0), 0));
+      const k = sum.indexOf(Math.max(...sum));
+      let name = sum[k] > 0 ? LABELS[k].vi : "Cảnh " + pad(gi + 1);
+      used[name] = (used[name] || 0) + 1; if (used[name] > 1) name += " " + used[name];
+      const day = days.length > 1 ? "Ngày " + (days.indexOf(dayKey(g.clips[0].time)) + 1) + "/" : "";
+      return { name, label: sum[k] > 0 ? LABELS[k].vi : "", clips: g.clips, path: day + pad(gi + 1) + " " + safe(name), dayPart: day };
+    });
+  }
+
+  // ---------- danh sách cho editor ----------
+  function listText() {
+    let t = `SOURCE: ${project} · ${clips.length} clip\n\n`;
+    scenes.forEach(s => {
+      const cs = s.clips;
+      t += `=== ${s.path}` + (cs[0].timeFromFile ? `  (${fmtDate(cs[0].time)} ${fmtTime(cs[0].time)}–${fmtTime(cs[cs.length - 1].time)})` : "") + `, ${cs.length} clip ===\n`;
+      cs.forEach(c => t += `- ${c.name}` + (c.timeFromFile ? `  ${fmtTime(c.time)}` : "") + `  (${[fmtDur(c.dur), fmtMB(c.size)].filter(Boolean).join(", ")})\n`);
+      t += "\n";
+    });
+    return t;
+  }
+
+  // ---------- hiển thị ----------
+  function render() {
+    const box = $("scenes"); box.innerHTML = "";
+    scenes.forEach(s => {
+      const card = document.createElement("section"); card.className = "card scene";
+      const head = document.createElement("div"); head.className = "scene-head";
+      const inp = document.createElement("input"); inp.type = "text"; inp.value = s.name; inp.setAttribute("aria-label", "Tên cảnh");
+      inp.addEventListener("change", async () => {
+        const nv = safe(inp.value); if (!nv || nv === s.name || !s.folderId) return;
+        const leaf = s.path.split("/").pop().replace(/^(\d+)\s.*$/, "$1") + " " + nv;
+        try { await run("renameFolder", s.folderId, leaf); s.name = nv; s.path = s.dayPart + leaf; path.textContent = "Thư mục: " + s.path; setStatus("Đã đổi tên thư mục trên Drive.", "ok"); }
+        catch (e) { setStatus("Chưa đổi được tên trên Drive. Thử lại.", "err"); inp.value = s.name; }
+      });
+      head.appendChild(inp);
+      const chip = document.createElement("span"); chip.className = "chip"; chip.textContent = s.clips.length + " clip"; head.appendChild(chip);
+      const path = document.createElement("span"); path.className = "path"; path.textContent = "Thư mục: " + s.path; head.appendChild(path);
+      card.appendChild(head);
+      const grid = document.createElement("div"); grid.className = "clips";
+      s.clips.forEach(c => {
+        const el = document.createElement("div"); el.className = "clip";
+        const th = document.createElement("div"); th.className = "thumb";
+        if (c.thumb) { const im = document.createElement("img"); im.src = c.thumb; im.alt = c.name; th.appendChild(im); } else th.textContent = "Không có hình";
+        el.appendChild(th);
+        const n = document.createElement("div"); n.className = "name"; n.textContent = c.name; n.title = c.name; el.appendChild(n);
+        const m = document.createElement("div"); m.className = "meta"; m.textContent = [c.timeFromFile ? fmtDate(c.time) + " " + fmtTime(c.time) : "", fmtDur(c.dur)].filter(Boolean).join(" · "); el.appendChild(m);
+        grid.appendChild(el);
+      });
+      card.appendChild(grid);
+      box.appendChild(card);
+    });
+  }
+
+  // ---------- nút Chia ----------
+  $("go").addEventListener("click", async () => {
+    const btn = $("go"); btn.disabled = true; $("tools").hidden = true; $("scenes").innerHTML = ""; $("outBox").hidden = true;
+    try {
+      setStatus("Đang đọc thư mục trên Drive…");
+      const res = await run("listClips", $("link").value);
+      project = res.folderName;
+      if (!res.clips.length) { setStatus("Thư mục này chưa có clip nào nằm trực tiếp bên trong.", "err"); return; }
+      clips = res.clips.map(c => ({ ...c, thumb: null, time: new Date(c.created), timeFromFile: false, dur: NaN }));
+      let done = 0;
+      const queue = clips.slice();
+      async function worker() {
+        while (queue.length) {
+          const c = queue.shift();
+          const info = await run("inspectClip", c.id, c.size).catch(() => ({}));
+          c.thumb = info.thumb || null; c.dur = info.dur || NaN;
+          if (info.time) { c.time = new Date(info.time); c.timeFromFile = true; }
+          done++; setStatus(`Đang xem clip trên Drive ${done}/${clips.length}…`); setBar(done / clips.length);
+        }
+      }
+      await Promise.all([worker(), worker(), worker()]);
+      setBar(null);
+      if (clips.some(c => c.timeFromFile)) clips.sort((a, b) => a.time - b.time || a.name.localeCompare(b.name));
+      else clips.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+      const aiOk = await classify();
+      sortClips();
+
+      setStatus("Đang tạo thư mục trên Drive…");
+      const f = await run("ensureFolders", res.folderId, scenes.map(s => s.path));
+      scenes.forEach(s => s.folderId = f.map[s.path]);
+      job = { rootId: res.folderId, created: f.created, moved: [], listId: null };
+      const pairs = scenes.flatMap(s => s.clips.map(c => ({ id: c.id, to: s.folderId })));
+      for (let i = 0; i < pairs.length; i += 10) {
+        const part = pairs.slice(i, i + 10);
+        await run("moveFiles", part);
+        job.moved.push(...part.map(p => p.id));
+        setStatus(`Đang chuyển clip vào thư mục ${Math.min(i + 10, pairs.length)}/${pairs.length}…`); setBar((i + part.length) / pairs.length);
+      }
+      job.listId = await run("writeList", res.folderId, "﻿" + listText());
+      setBar(null);
+      render();
+      const el = setStatus(`Xong: chia ${clips.length} clip thành ${scenes.length} thư mục trong “${project}”.` + (aiOk ? "" : " (Không tải được bộ nhận diện hình nên chia theo giờ quay.)") + " Đổi tên cảnh ngay dưới đây là thư mục trên Drive đổi theo. ", "ok");
+      const a = document.createElement("a"); a.href = "https://drive.google.com/drive/folders/" + res.folderId; a.target = "_blank"; a.rel = "noopener"; a.textContent = "Mở thư mục trên Drive"; el.appendChild(a);
+      $("tools").hidden = false;
+    } catch (e) {
+      setBar(null);
+      const m = String(e && e.message || e);
+      setStatus(/LINK_SAI/.test(m) ? "Link chưa đúng. Dán link thư mục dạng https://drive.google.com/drive/folders/…" :
+        /KHONG_THAY/.test(m) ? "Không mở được thư mục. Kiểm tra link và quyền Sửa của tài khoản đang dùng." :
+        "Bị dừng giữa chừng: " + m + (job && job.moved.length ? " — bấm Hoàn tác để trả clip đã chuyển về chỗ cũ." : ""), "err");
+      if (job && job.moved.length) $("tools").hidden = false;
+    } finally { btn.disabled = false; }
+  });
+
+  $("undo").addEventListener("click", async () => {
+    if (!job) return;
+    $("undo").disabled = true;
+    try {
+      setStatus("Đang trả clip về chỗ cũ…");
+      await run("undoSort", job.rootId, job.moved, job.created, job.listId);
+      job = null; $("tools").hidden = true; $("scenes").innerHTML = "";
+      setStatus("Đã trả hết clip về như cũ. Thư mục con vừa tạo đã vào Thùng rác của Drive.", "ok");
+    } catch (e) { setStatus("Hoàn tác bị lỗi, thử bấm lại.", "err"); }
+    finally { $("undo").disabled = false; }
+  });
+
+  async function show(text) {
+    $("outBox").hidden = false; $("out").textContent = text;
+    try { await navigator.clipboard.writeText(text); setStatus("Đã copy.", "ok"); }
+    catch (e) { const r = document.createRange(); r.selectNodeContents($("out")); const s = getSelection(); s.removeAllRanges(); s.addRange(r); setStatus("Đã bôi đen sẵn bên dưới, bấm Ctrl+C để copy.", ""); }
+  }
+  $("copy").addEventListener("click", () => show(listText()));
+
+  // ---------- kịch bản nháp theo mẫu ----------
+  const VO = {
+    "Ăn uống": "Mở màn bằng một bữa ăn nóng hổi.", "Đồ ăn vặt": "Không thể thiếu món ăn vặt nóng giòn.",
+    "Quán cà phê": "Ghé một quán cà phê nhỏ ngồi chill.", "Rừng cây, lá": "Đi dạo giữa rừng cây, lá rụng đầy lối.",
+    "Vườn hoa": "Hoa nở khắp nơi, chụp kiểu nào cũng đẹp.", "Đồi núi": "Lên đồi ngắm cảnh, gió mát rượi.",
+    "Trên xe": "Trên đường di chuyển, cảnh dọc đường cũng đáng nhớ.", "Phòng nghỉ": "Về phòng nghỉ ngơi, mở cửa sổ ngắm một chút.",
+    "Dạo phố": "Dạo một vòng phố, thấy gì cũng muốn ghé.", "Chợ": "Ghé chợ xem có gì ngon.", "Biển": "Ra biển hóng gió, nghe sóng vỗ.",
+    "Hồ, sông": "Ngồi bên hồ, chậm lại một chút.", "Thú cưng": "Gặp thêm một bạn nhỏ dễ thương.",
+    "Makeup, mỹ phẩm": "Makeup nhẹ nhàng trước khi đi.", "Buổi tối": "Tối đến, phố lên đèn."
+  };
+  $("scriptBtn").addEventListener("click", () => {
+    const cn = c => c.name.replace(/\.[^.]+$/, "");
+    const hook = scenes.find(s => /Rừng|Đồi|Biển|Hồ|Vườn|Buổi tối/.test(s.label)) || scenes[0];
+    let t = `KỊCH BẢN NHÁP: ${project} (~45 giây)\n\nHOOK (0–3s) | ${cn(hook.clips[0])} | "Một ngày ${project} của mình, gặp gì quay nấy." | chữ: ${project.toUpperCase()}\n\n`;
+    let sec = 3; const per = Math.max(3, Math.round(39 / scenes.length));
+    scenes.forEach(s => {
+      t += `${sec}–${sec + per}s | ${s.clips.slice(0, 3).map(cn).join(", ")} | "${VO[s.label] || "Thêm một chút khoảnh khắc."}" | chữ: ${s.name}\n`;
+      sec += per;
+    });
+    t += `${sec}–${sec + 3}s | ${cn(scenes[scenes.length - 1].clips.slice(-1)[0])} | "${project} vậy là đủ. Lưu lại cho chuyến sau nha." | chữ: LƯU LẠI CHO CHUYẾN SAU\n\n`;
+    t += "GHI CHÚ: bản nháp theo mẫu, sửa lời cho đúng tên món, tên quán. Cắt theo nhịp nhạc, mỗi clip 1,5–3 giây.\n";
+    show(t);
+  });
+})();
+</script>
+</body>
+</html>
