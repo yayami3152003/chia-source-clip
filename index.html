@@ -147,6 +147,15 @@
 
   <section aria-labelledby="s1">
     <h2 id="s1"><span class="step">1</span>Chọn clip</h2>
+    <div class="row">
+      <label class="field grow">Dán link thư mục Google Drive chứa clip
+        <input type="text" id="driveLink" placeholder="https://drive.google.com/drive/folders/..." spellcheck="false" autocomplete="off">
+      </label>
+      <button class="primary" id="driveGo">Xem và chia trên Drive</button>
+    </div>
+    <div class="status" id="driveLinkStatus" aria-live="polite"></div>
+    <div class="row"><button id="driveUndo" hidden>Hoàn tác: trả clip về như cũ</button></div>
+    <div class="muted small">Hoặc kéo clip từ máy vào ô dưới:</div>
     <div class="drop" id="drop" tabindex="0" role="button" aria-label="Chọn hoặc kéo thả clip">
       <strong>Kéo thả clip vào đây</strong>
       <span class="muted">hoặc bấm để chọn file · MP4, MOV · chọn nhiều file cùng lúc</span>
@@ -367,11 +376,18 @@
   // ---------- Google Drive ----------
   const GOOGLE_CLIENT_ID = "";
   const G_STORE = "chia-source-google-client-id";
-  function clientId() { let v = GOOGLE_CLIENT_ID; try { v = v || localStorage.getItem(G_STORE) || ""; } catch (e) {} return v.trim(); }
+  const validId = v => /^[\w-]+\.apps\.googleusercontent\.com$/.test(String(v || "").trim());
+  function clientId() { let v = GOOGLE_CLIENT_ID; try { v = v || localStorage.getItem(G_STORE) || ""; } catch (e) {} v = v.trim(); return validId(v) ? v : ""; }
   $("gClientId").value = clientId();
   $("driveSetup").open = !clientId();
   $("gSave").addEventListener("click", () => {
-    try { localStorage.setItem(G_STORE, $("gClientId").value.trim()); } catch (e) {}
+    const v = $("gClientId").value.trim();
+    if (!validId(v)) {
+      if (/drive\.google\.com/.test(v)) { $("driveLink").value = v; $("gClientId").value = ""; setStatus($("driveStatus"), "Đó là link thư mục Drive, mình đã chuyển lên ô “Dán link thư mục” ở bước 1. Ô này cần Google Client ID, dạng …apps.googleusercontent.com.", "err"); }
+      else setStatus($("driveStatus"), "Client ID chưa đúng. Mã đúng có đuôi .apps.googleusercontent.com.", "err");
+      return;
+    }
+    try { localStorage.setItem(G_STORE, v); } catch (e) {}
     tokenClient = null; $("driveSetup").open = !clientId();
     setStatus($("driveStatus"), clientId() ? "Đã lưu. Bấm nút ở trên để chia và đưa lên Drive." : "Chưa có Client ID.", clientId() ? "ok" : "");
   });
@@ -389,7 +405,7 @@
     return new Promise((res, rej) => {
       if (!window.google || !google.accounts || !google.accounts.oauth2) return rej(new Error("gis"));
       if (!tokenClient) tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: clientId(), scope: "https://www.googleapis.com/auth/drive.file",
+        client_id: clientId(), scope: "https://www.googleapis.com/auth/drive",
         callback: r => { const p = pendingToken; pendingToken = null; r && r.access_token ? p.res(r.access_token) : p.rej(new Error(r && r.error || "denied")); },
         error_callback: err => { const p = pendingToken; pendingToken = null; p && p.rej(new Error(err && err.type || "denied")); }
       });
@@ -409,19 +425,19 @@
     return (await r.json()).id;
   }
   async function uploadFile(token, blob, name, parent, type, onProgress) {
-    const init = await gFetch(token, "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id", {
+    const init = await gFetch(token, "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id&supportsAllDrives=true", {
       method: "POST",
       headers: { "Content-Type": "application/json; charset=UTF-8", "X-Upload-Content-Type": type, "X-Upload-Content-Length": String(blob.size) },
       body: JSON.stringify({ name, parents: [parent] })
     });
     const loc = init.headers.get("Location");
     if (!loc) throw new Error("no upload url");
-    await new Promise((res, rej) => {
+    return await new Promise((res, rej) => {
       const x = new XMLHttpRequest();
       x.open("PUT", loc);
       x.setRequestHeader("Content-Type", type);
       x.upload.onprogress = e => { if (e.lengthComputable) onProgress(e.loaded); };
-      x.onload = () => x.status < 300 ? res() : rej(new Error("upload " + x.status));
+      x.onload = () => { if (x.status >= 300) return rej(new Error("upload " + x.status)); let id = null; try { id = JSON.parse(x.responseText).id; } catch (e) {} res(id); };
       x.onerror = () => rej(new Error("network"));
       x.send(blob);
     });
@@ -465,6 +481,141 @@
   }
   let lastDriveLink = "";
 
+  // ---------- dán link thư mục Drive: xem và chia ngay trên Drive ----------
+  let driveMode = null;   // {token, folderId, moved:[{id, to}], created:[], listId}
+  function folderIdFrom(link) {
+    const s = String(link || "").trim();
+    const m = s.match(/folders\/([A-Za-z0-9_-]{10,})/) || s.match(/[?&]id=([A-Za-z0-9_-]{10,})/);
+    return m ? m[1] : (/^[A-Za-z0-9_-]{20,}$/.test(s) ? s : null);
+  }
+  async function driveList(token, folderId) {
+    let out = [], pageToken = "";
+    do {
+      const q = encodeURIComponent(`'${folderId}' in parents and trashed=false`);
+      const r = await gFetch(token, `https://www.googleapis.com/drive/v3/files?q=${q}&pageSize=200&supportsAllDrives=true&includeItemsFromAllDrives=true&fields=nextPageToken,files(id,name,mimeType,size,thumbnailLink,createdTime,videoMediaMetadata(durationMillis))` + (pageToken ? "&pageToken=" + pageToken : ""));
+      const j = await r.json(); out = out.concat(j.files || []); pageToken = j.nextPageToken || "";
+    } while (pageToken);
+    return out;
+  }
+  function driveReader(token, id) {
+    return async (start, len) => {
+      const r = await fetch(`https://www.googleapis.com/drive/v3/files/${id}?alt=media&supportsAllDrives=true`, { headers: { Authorization: "Bearer " + token, Range: `bytes=${start}-${start + len - 1}` } });
+      if (!r.ok) throw new Error("range " + r.status);
+      return new DataView(await r.arrayBuffer());
+    };
+  }
+  async function driveThumb(link) {
+    if (!link) return null;
+    try {
+      const r = await fetch(link.replace(/=s\d+$/, "=s400"));
+      if (!r.ok) return null;
+      const blob = await r.blob();
+      const bmp = await createImageBitmap(blob);
+      const land = bmp.width > bmp.height; bmp.close && bmp.close();
+      return { blob, land };
+    } catch (e) { return null; }
+  }
+  async function moveOnDrive() {
+    const t = driveMode.token, root = driveMode.folderId, st = $("driveLinkStatus");
+    const paths = folderPaths(), cache = {};
+    async function folderFor(path) {
+      let parent = root, acc = "";
+      for (const seg of path.split("/")) {
+        acc += "/" + seg;
+        if (!cache[acc]) { cache[acc] = await makeFolder(t, seg, parent); driveMode.created.push(cache[acc]); }
+        parent = cache[acc];
+      }
+      return parent;
+    }
+    let n = 0;
+    for (const c of clips) {
+      const dir = await folderFor(paths.get(c.scene));
+      setStatus(st, `Đang chia trên Drive ${++n}/${clips.length}: ${c.name} → ${paths.get(c.scene)}`);
+      await gFetch(t, `https://www.googleapis.com/drive/v3/files/${c.driveId}?addParents=${dir}&removeParents=${root}&supportsAllDrives=true&fields=id`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: "{}" });
+      driveMode.moved.push({ id: c.driveId, to: dir });
+    }
+    driveMode.listId = await uploadFile(t, new Blob(["﻿" + listText()], { type: "text/plain" }), "_DANH-SACH-SOURCE.txt", root, "text/plain", () => {});
+  }
+  $("driveGo").addEventListener("click", async () => {
+    const st = $("driveLinkStatus"), btn = $("driveGo");
+    const folderId = folderIdFrom($("driveLink").value);
+    if (!folderId) { setStatus(st, "Link chưa đúng. Dán link thư mục dạng https://drive.google.com/drive/folders/…", "err"); return; }
+    if (!clientId()) {
+      $("driveSetup").open = true; $("driveSetup").scrollIntoView({ behavior: "smooth", block: "center" });
+      setStatus(st, "Cần cài Google Drive 1 lần trước: điền Google Client ID ở mục “Cài đặt Google Drive” (bước 2), bấm Lưu, rồi bấm lại nút này.", "err");
+      return;
+    }
+    const tokenP = requestToken(); tokenP.catch(() => {});
+    btn.disabled = true; $("driveUndo").hidden = true;
+    try {
+      setStatus(st, "Đang chờ bạn đăng nhập Google trong cửa sổ mới…");
+      const token = await tokenP;
+      setStatus(st, "Đang đọc thư mục trên Drive…");
+      const meta = await gFetch(token, `https://www.googleapis.com/drive/v3/files/${folderId}?fields=name&supportsAllDrives=true`).then(r => r.json());
+      const files = (await driveList(token, folderId)).filter(f => /^video\//.test(f.mimeType) || /\.(mp4|mov|m4v)$/i.test(f.name));
+      if (!files.length) { setStatus(st, "Thư mục này không có clip nào nằm trực tiếp bên trong.", "err"); return; }
+      clips.length = 0; scenes = []; script = null; $("scriptOut").hidden = true;
+      $("project").value = meta.name || $("project").value;
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        setStatus(st, `Đang xem clip ${i + 1}/${files.length} trên Drive: ${f.name}`);
+        setBar($("loadBar"), i / files.length);
+        const size = Number(f.size || 0);
+        const t = size ? await shotTimeFrom(driveReader(token, f.id), size) : null;
+        const th = await driveThumb(f.thumbnailLink);
+        clips.push({
+          id: "d" + i, file: null, driveId: f.id, name: f.name, size,
+          time: t || new Date(f.createdTime), timeFrom: t ? "file" : "drive",
+          dur: f.videoMediaMetadata && f.videoMediaMetadata.durationMillis ? Number(f.videoMediaMetadata.durationMillis) / 1000 : NaN,
+          ok: !!th, landscape: th ? th.land : false, desc: "", scene: null,
+          thumbBlob: th ? th.blob : null, thumbUrl: th ? URL.createObjectURL(th.blob) : ""
+        });
+      }
+      setBar($("loadBar"), null);
+      if (clips.every(c => c.timeFrom !== "file")) clips.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+      else clips.sort((a, b) => a.time - b.time || a.name.localeCompare(b.name));
+      setStatus($("loadStatus"), `${clips.length} clip trên Drive · ${fmtMB(clips.reduce((s, c) => s + c.size, 0))}.`, "ok");
+      renderClips();
+      await autoSort();
+      driveMode = { token, folderId, moved: [], created: [], listId: null };
+      await moveOnDrive();
+      setStatus(st, `Xong: đã chia ${clips.length} clip thành ${scenes.length} thư mục ngay trong thư mục Drive của bạn. `, "ok");
+      const a = document.createElement("a"); a.href = "https://drive.google.com/drive/folders/" + folderId; a.target = "_blank"; a.rel = "noopener"; a.textContent = "Mở thư mục trên Drive";
+      st.appendChild(a);
+      $("driveUndo").hidden = false;
+    } catch (e) {
+      setBar($("loadBar"), null);
+      const m = String(e && e.message || "");
+      setStatus(st,
+        m === "gis" ? "Không tải được phần đăng nhập Google. Kiểm tra mạng rồi bấm lại." :
+        /denied|popup|access_denied/.test(m) ? "Bạn chưa cho phép trang dùng Drive, hoặc cửa sổ đăng nhập bị chặn. Bấm lại và chọn Cho phép." :
+        /drive 404/.test(m) ? "Không thấy thư mục. Kiểm tra link, và tài khoản Google bạn đăng nhập phải có quyền Sửa thư mục này." :
+        /drive 403/.test(m) ? "Tài khoản này chưa có quyền Sửa thư mục. Nhờ chủ thư mục chia sẻ quyền Editor rồi bấm lại." :
+        "Bị dừng giữa chừng. " + (driveMode && driveMode.moved.length ? "Bấm Hoàn tác để trả các clip đã chuyển về chỗ cũ." : "Bấm lại để thử lần nữa."), "err");
+      if (driveMode && driveMode.moved.length) $("driveUndo").hidden = false;
+    } finally { btn.disabled = false; refreshButtons(); }
+  });
+  $("driveUndo").addEventListener("click", async () => {
+    if (!driveMode) return;
+    const st = $("driveLinkStatus"), btn = $("driveUndo"), t = driveMode.token, root = driveMode.folderId;
+    btn.disabled = true;
+    try {
+      let n = 0;
+      for (const m of driveMode.moved.slice().reverse()) {
+        setStatus(st, `Đang trả clip về chỗ cũ ${++n}/${driveMode.moved.length}…`);
+        await gFetch(t, `https://www.googleapis.com/drive/v3/files/${m.id}?addParents=${root}&removeParents=${m.to}&supportsAllDrives=true&fields=id`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: "{}" });
+      }
+      for (const id of driveMode.created.slice().reverse().concat(driveMode.listId ? [driveMode.listId] : [])) {
+        await gFetch(t, `https://www.googleapis.com/drive/v3/files/${id}?supportsAllDrives=true`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ trashed: true }) });
+      }
+      driveMode.moved = []; driveMode.created = []; driveMode.listId = null;
+      btn.hidden = true;
+      setStatus(st, "Đã trả hết clip về như cũ. Các thư mục con vừa tạo đã chuyển vào Thùng rác của Drive.", "ok");
+    } catch (e) {
+      setStatus(st, "Hoàn tác bị dừng (có thể phiên đăng nhập đã hết hạn sau 1 giờ). Bấm lại Hoàn tác, hoặc kéo clip về trên Drive.", "err");
+    } finally { btn.disabled = false; }
+  });
+
   // ---------- helpers ----------
   const pad = n => String(n).padStart(2, "0");
   const fmtTime = d => pad(d.getHours()) + ":" + pad(d.getMinutes());
@@ -478,7 +629,10 @@
 
   // ---------- read shot time from MP4/MOV (mvhd creation_time) ----------
   async function readBytes(file, start, len) { return new DataView(await file.slice(start, start + len).arrayBuffer()); }
-  async function shotTime(file) {
+  function shotTime(file) { return shotTimeFrom((s, l) => readBytes(file, s, l), file.size); }
+  async function shotTimeFrom(read, fileSize) {
+    const file = { size: fileSize };
+    const readBytes = (_f, s, l) => read(s, Math.max(1, Math.min(l, fileSize - s)));
     try {
       let off = 0;
       for (let guard = 0; guard < 64 && off + 8 <= file.size; guard++) {
@@ -1014,8 +1168,10 @@
     $("autoBtn").disabled = !has;
     $("resortBtn").disabled = !has;
     $("scriptBtn").disabled = !sorted || loading;
+    const fromDrive = clips.length > 0 && clips.some(c => !c.file);
     $("zipBtn").disabled = !sorted || !downloads || loading;
-    $("zipBtn").hidden = !downloads && sorted;
+    $("zipBtn").hidden = fromDrive;
+    $("autoBtn").hidden = fromDrive;
     $("copyList").disabled = !sorted;
     if (sorted && /^Chia cảnh/.test($("scriptStatus").textContent)) setStatus($("scriptStatus"), "Sẵn sàng. Chọn độ dài rồi bấm “Tạo kịch bản nháp”.");
     $("moveBtn").hidden = !(dirHandle && sorted && clips.every(c => c.handle));
